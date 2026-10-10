@@ -11,15 +11,16 @@ const PRIORITIES = [
   { value: 'none', label: 'None', color: '#D1D5DB' },
 ]
 
-export default function AddTaskModal({ onClose, editTask }) {
+export default function AddTaskModal({ onClose, editTask, draft }) {
   const { addTask, updateTask, lists, settings } = useTaskStore()
   const isEdit = !!editTask
+  const seed = editTask || draft || {}
 
-  const [title, setTitle] = useState(editTask?.title || '')
-  const [notes, setNotes] = useState(editTask?.notes || '')
-  const [dueDate, setDueDate] = useState(editTask?.dueDate || '')
-  const [dueTime, setDueTime] = useState(editTask?.dueTime || '')
-  const [priority, setPriority] = useState(editTask?.priority || 'none')
+  const [title, setTitle] = useState(seed.title || '')
+  const [notes, setNotes] = useState(seed.notes || '')
+  const [dueDate, setDueDate] = useState(seed.dueDate || '')
+  const [dueTime, setDueTime] = useState(seed.dueTime || '')
+  const [priority, setPriority] = useState(seed.priority || 'none')
   const [listId, setListId] = useState(editTask?.listId || 'inbox')
   const [saving, setSaving] = useState(false)
 

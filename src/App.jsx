@@ -4,11 +4,13 @@ import Sidebar from './components/Sidebar'
 import TaskList from './components/TaskList'
 import AddTaskModal from './components/AddTaskModal'
 import Settings from './components/Settings'
-import { Menu, Plus, X } from 'lucide-react'
+import { Menu, Plus, X, Mic } from 'lucide-react'
 import { useTaskStore } from './store/useTaskStore'
 import { syncReminders, applyNotificationCompletions } from './lib/notifications'
 import { autoImport } from './lib/googleCalendar'
+import { parseSpokenTask, isGeminiConfigured } from './lib/voiceTask'
 import VoiceReminder from './plugins/VoiceReminder'
+import SpeechCapture from './plugins/SpeechCapture'
 
 // Bring the app in line with what happened while it was closed or in the background.
 async function refresh() {
@@ -20,9 +22,32 @@ async function refresh() {
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const [draft, setDraft] = useState(null)
+  const [listening, setListening] = useState(false)
+  const [voiceStatus, setVoiceStatus] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const calendarError = useTaskStore((s) => s.calendarError)
   const setCalendarError = useTaskStore((s) => s.setCalendarError)
+
+  const handleVoiceCapture = async () => {
+    setVoiceStatus('')
+    setListening(true)
+    try {
+      await SpeechCapture.requestPermissions()
+      setVoiceStatus(isGeminiConfigured() ? 'Speak now. Gemini will fill in the task.' : 'Speak now.')
+      const { text } = await SpeechCapture.listen()
+      setVoiceStatus('Working out the task…')
+      const parsed = await parseSpokenTask(text)
+      setDraft(parsed)
+      setVoiceStatus('')
+      setAddOpen(true)
+    } catch (error) {
+      const message = error?.message || 'Could not hear a task'
+      if (!/cancel/i.test(message)) setVoiceStatus(message)
+    } finally {
+      setListening(false)
+    }
+  }
 
   useEffect(() => {
     const run = () => refresh().catch(console.error)
@@ -78,16 +103,48 @@ export default function App() {
 
         <TaskList />
 
-        {/* FAB */}
+        {voiceStatus && !listening && (
+          <div className="fixed bottom-28 left-4 right-28 z-30 bg-white border border-gray-200 text-sm text-gray-700 rounded-2xl px-3 py-2 shadow">
+            {voiceStatus}
+          </div>
+        )}
         <button
-          onClick={() => setAddOpen(true)}
+          type="button"
+          onClick={handleVoiceCapture}
+          disabled={listening}
+          aria-label="Create a task by speaking"
+          className="fixed bottom-8 right-24 w-14 h-14 bg-white border border-gray-200 rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-transform z-30 disabled:opacity-60">
+          <Mic size={24} className={listening ? 'text-red-500' : 'text-primary'} />
+        </button>
+        <button
+          onClick={() => { setDraft(null); setAddOpen(true) }}
           className="fixed bottom-8 right-6 w-14 h-14 bg-primary rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-transform z-30"
           style={{ boxShadow: '0 4px 20px rgba(71,114,250,0.4)' }}>
           <Plus size={26} className="text-white" />
         </button>
       </div>
 
-      {addOpen && <AddTaskModal onClose={() => setAddOpen(false)} />}
+      {listening && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-end">
+          <div className="w-full bg-white rounded-t-3xl px-6 pt-6 pb-10">
+            <p className="text-lg font-semibold text-gray-800">Listening…</p>
+            <p className="text-sm text-gray-500 mt-1">{voiceStatus || 'Say the task, including the day and time.'}</p>
+            <button
+              type="button"
+              onClick={() => { SpeechCapture.stop().catch(() => {}); setListening(false) }}
+              className="mt-5 w-full bg-gray-100 text-gray-800 font-medium py-3 rounded-2xl">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {addOpen && (
+        <AddTaskModal
+          draft={draft}
+          onClose={() => { setAddOpen(false); setDraft(null) }}
+        />
+      )}
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
     </div>
   )

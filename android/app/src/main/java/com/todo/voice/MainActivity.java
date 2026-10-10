@@ -13,6 +13,7 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(VoiceReminderPlugin.class);
+        registerPlugin(SpeechCapturePlugin.class);
         super.onCreate(savedInstanceState);
         VoiceReminderHelper.ensureChannel(this);
     }
