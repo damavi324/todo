@@ -1,43 +1,48 @@
 import { useState } from 'react'
 import { useTaskStore } from '../store/useTaskStore'
 import { Trash2, Calendar, Flag, ChevronDown, ChevronUp } from 'lucide-react'
-import { cancelTaskNotification } from '../lib/notifications'
-import { deleteCalendarEvent, isSignedIn } from '../lib/googleCalendar'
+import { syncReminders } from '../lib/notifications'
+import { deleteCalendarEvent, calendarActive, reportCalendarError } from '../lib/googleCalendar'
+import { parseLocalDate, startOfToday, addDays } from '../lib/dates'
 
 const PRIORITY_COLOR = { high: '#EF4444', medium: '#F97316', low: '#3B82F6', none: '#D1D5DB' }
-const PRIORITY_LABEL = { high: 'High', medium: 'Medium', low: 'Low', none: '' }
 
 export default function TaskItem({ task, onEdit }) {
-  const { toggleTask, deleteTask, settings } = useTaskStore()
+  const { toggleTask, deleteTask, dismissCalendarEvent, settings } = useTaskStore()
   const [expanded, setExpanded] = useState(false)
 
   const handleToggle = () => {
     toggleTask(task.id)
-    cancelTaskNotification(task.id)
+    syncReminders().catch(console.error)
   }
 
   const handleDelete = async () => {
-    cancelTaskNotification(task.id)
-    if (settings.googleCalendarEnabled && task.googleEventId && isSignedIn()) {
-      await deleteCalendarEvent(task.googleEventId, settings.googleCalendarId).catch(() => {})
+    if (task.source === 'calendar') {
+      // Came from Google Calendar: leave the event alone, just stop importing it.
+      dismissCalendarEvent(task.googleEventId)
+    } else if (task.googleEventId && calendarActive()) {
+      await deleteCalendarEvent(task.googleEventId, settings.googleCalendarId).catch((e) => {
+        if (!/not found|deleted/i.test(e?.message || '')) reportCalendarError(e)
+      })
     }
     deleteTask(task.id)
+    syncReminders().catch(console.error)
   }
 
   const formatDue = (date, time) => {
-    if (!date) return null
-    const d = new Date(date)
-    const today = new Date(); today.setHours(0,0,0,0)
-    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
+    const d = parseLocalDate(date)
+    if (!d) return null
+    const today = startOfToday()
+    const tomorrow = addDays(today, 1)
     let label
     if (d >= today && d < tomorrow) label = 'Today'
-    else if (d >= tomorrow && d < new Date(tomorrow.getTime() + 86400000)) label = 'Tomorrow'
+    else if (d >= tomorrow && d < addDays(today, 2)) label = 'Tomorrow'
     else label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     return time ? `${label} ${time}` : label
   }
 
   const dueLabel = formatDue(task.dueDate, task.dueTime)
-  const isOverdue = task.dueDate && !task.completed && new Date(task.dueDate) < new Date(new Date().setHours(0,0,0,0))
+  const isOverdue = task.dueDate && !task.completed && parseLocalDate(task.dueDate) < startOfToday()
 
   return (
     <div className={`bg-white rounded-2xl mb-2 shadow-sm overflow-hidden task-enter ${task.completed ? 'opacity-60' : ''}`}>

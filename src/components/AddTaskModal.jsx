@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useTaskStore } from '../store/useTaskStore'
-import { scheduleTaskNotification, requestNotificationPermission } from '../lib/notifications'
-import { createCalendarEvent, updateCalendarEvent, isSignedIn } from '../lib/googleCalendar'
+import { syncReminders, requestNotificationPermission } from '../lib/notifications'
+import { createCalendarEvent, updateCalendarEvent, calendarActive, reportCalendarError } from '../lib/googleCalendar'
 import { X, Flag, Calendar, Clock, AlignLeft, List } from 'lucide-react'
 
 const PRIORITIES = [
@@ -30,26 +30,32 @@ export default function AddTaskModal({ onClose, editTask }) {
     const taskData = { title: title.trim(), notes, dueDate, dueTime, priority, listId }
 
     try {
+      let task
       if (isEdit) {
         updateTask(editTask.id, taskData)
-        if (settings.googleCalendarEnabled && editTask.googleEventId && isSignedIn()) {
-          await updateCalendarEvent(editTask.googleEventId, { ...editTask, ...taskData }, settings.googleCalendarId).catch(() => {})
-        }
-        if (dueDate) scheduleTaskNotification({ ...editTask, ...taskData })
+        task = { ...editTask, ...taskData }
       } else {
-        const newTask = { ...taskData, googleEventId: null }
-        if (settings.googleCalendarEnabled && isSignedIn()) {
-          try {
-            const eventId = await createCalendarEvent(newTask, settings.googleCalendarId)
-            newTask.googleEventId = eventId
-          } catch {}
-        }
-        addTask(newTask)
-        if (dueDate) {
-          await requestNotificationPermission()
-          scheduleTaskNotification({ ...newTask, id: 'pending' })
+        task = addTask({ ...taskData, googleEventId: null })
+      }
+
+      // Tasks imported from Google Calendar follow the calendar; they are not pushed back.
+      if (calendarActive() && task.source !== 'calendar') {
+        try {
+          if (task.googleEventId) {
+            await updateCalendarEvent(task.googleEventId, task, settings.googleCalendarId)
+          } else {
+            const eventId = await createCalendarEvent(task, settings.googleCalendarId)
+            updateTask(task.id, { googleEventId: eventId })
+          }
+        } catch (e) {
+          reportCalendarError(e)
         }
       }
+
+      if (dueDate) await requestNotificationPermission()
+      await syncReminders()
+    } catch (e) {
+      console.error(e)
     } finally {
       setSaving(false)
       onClose()

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTaskStore } from '../store/useTaskStore'
-import { Inbox, Calendar, CalendarDays, List, Plus, X, Settings, CheckSquare } from 'lucide-react'
+import { Calendar, CalendarDays, List, Plus, X, Settings, CheckSquare } from 'lucide-react'
+import { parseLocalDate, startOfToday, addDays } from '../lib/dates'
 
 const SMART_LISTS = [
   { id: 'today', name: 'Today', icon: Calendar, color: '#4772FA' },
@@ -17,9 +18,9 @@ export default function Sidebar({ onClose, onOpenSettings }) {
   const [pickedColor, setPickedColor] = useState(colors[0])
 
   const countFor = (id) => {
-    const today = new Date(); today.setHours(0,0,0,0)
-    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
-    if (id === 'today') return tasks.filter(t => !t.completed && t.dueDate && new Date(t.dueDate) >= today && new Date(t.dueDate) < tomorrow).length
+    const today = startOfToday()
+    const tomorrow = addDays(today, 1)
+    if (id === 'today') return tasks.filter(t => !t.completed && t.dueDate && parseLocalDate(t.dueDate) >= today && parseLocalDate(t.dueDate) < tomorrow).length
     if (id === 'scheduled') return tasks.filter(t => !t.completed && t.dueDate).length
     if (id === 'all') return tasks.filter(t => !t.completed).length
     return tasks.filter(t => !t.completed && t.listId === id).length
