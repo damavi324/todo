@@ -38,6 +38,8 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
+          # gradle.properties points at a JDK on the Windows PC; use the runner's JDK 21 here.
+          sed -i '/^org.gradle.java.home/d' gradle.properties
           set -o pipefail
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log
       - name: Save the APK to the apk-builds branch
