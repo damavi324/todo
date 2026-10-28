@@ -1,0 +1,57 @@
+# Builds the debug APK on GitHub's servers (they have the Android SDK) and saves it
+# to the "apk-builds" branch as todo-debug.apk, so it can be downloaded or attached.
+name: Build APK
+on:
+  push:
+    branches: [main, feature/calling-ai-voice]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install and build the web app
+        run: |
+          npm ci || npm install
+          npm run build
+          npx cap sync android
+      - name: Build the APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+      - name: Save the APK to the apk-builds branch
+        run: |
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          SHA=$(git rev-parse --short HEAD)
+          BRANCH="${GITHUB_REF_NAME}"
+          mkdir -p /tmp/out && cp "$APK" /tmp/out/todo-debug.apk
+          cd /tmp/out
+          echo "Built from ${BRANCH} @ ${SHA} on $(date -u +%Y-%m-%dT%H:%MZ)" > BUILD.txt
+          git init -q -b apk-builds
+          git config user.name "apk-builder"
+          git config user.email "apk-builder@users.noreply.github.com"
+          git add todo-debug.apk BUILD.txt
+          git commit -q -m "APK from ${BRANCH} @ ${SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" apk-builds
+      - uses: actions/upload-artifact@v4
+        with:
+          name: todo-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
