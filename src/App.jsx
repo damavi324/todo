@@ -42,6 +42,15 @@ export default function App() {
     else calls.disconnect()
   }, [callpilotUrl, callpilotConnected])
 
+  // Opening the app (or coming back to it) wakes a sleeping cloud server right away,
+  // so it's usually ready by the time you tap Call or the mic.
+  useEffect(() => {
+    if (!callpilotConnected || !callpilotUrl) return
+    const onVisible = () => { if (document.visibilityState === 'visible') useCallStore.getState().wake() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [callpilotUrl, callpilotConnected])
+
   // Short-lived toast for call notices.
   const [toast, setToast] = useState(null)
   useEffect(() => {

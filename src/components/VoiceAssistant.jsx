@@ -5,6 +5,7 @@ import { startDictation } from '../lib/dictation'
 import { parseSpokenTask } from '../lib/voiceTask'
 import { toLocalYMD } from '../lib/dates'
 import { useTaskStore } from '../store/useTaskStore'
+import { useCallStore } from '../store/useCallStore'
 import SpeechCapture from '../plugins/SpeechCapture'
 
 const PRIORITY_COLOR = { high: '#EF4444', medium: '#F97316', low: '#3B82F6' }
@@ -35,10 +36,57 @@ export default function VoiceAssistant({ onClose, onTask, onCall }) {
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const rec = useRef(null)
+  const [waking, setWaking] = useState(false)
+  const [onDevice, setOnDevice] = useState(false) // phone's own recognizer (stops by itself)
   const smart = isCallPilotReady()
+
+  // Turns what you said into a task and/or a call (Claude on the server, local parser as backup).
+  const interpret = async (heard) => {
+    setText(heard)
+    setPhase('thinking')
+    try {
+      if (useCallStore.getState().serverState !== 'up') {
+        setWaking(true)
+        const up = await useCallStore.getState().wake()
+        setWaking(false)
+        if (!up) throw new Error('The calling server didn’t wake up, so I used the basic parser.')
+      }
+      const { result: r } = await cp('/api/assistant', { text: heard, ...localNow(), lists: lists.map((l) => ({ id: l.id, name: l.name })) }, { timeoutMs: 45000 })
+      // Single, clear intent: go straight to it.
+      if (r.kind === 'task' && r.task) return onTask({ ...r.task, listId: r.task.listId || undefined })
+      setResult(r)
+      setPhase('result')
+    } catch (e) {
+      setWaking(false)
+      // Server hiccup: still save the words as a task with the local parser.
+      try {
+        const task = await parseSpokenTask(heard)
+        onTask({ ...task, parseWarning: e.message })
+      } catch {
+        setError(e.message)
+        setPhase('error')
+      }
+    }
+  }
 
   const begin = async () => {
     setText(''); setResult(null); setError(''); setPhase('listening')
+    // Server asleep (free cloud plan): start waking it, and listen on the phone meanwhile
+    // so you can talk right away instead of waiting for it.
+    const serverUp = useCallStore.getState().serverState === 'up' && useCallStore.getState().connected
+    setOnDevice(!smart || !serverUp)
+    if (smart && !serverUp) {
+      useCallStore.getState().wake()
+      try {
+        await SpeechCapture.requestPermissions()
+        const { text: heard } = await SpeechCapture.listen()
+        if (!heard?.trim()) { setError('I didn’t catch anything. Try again.'); setPhase('error'); return }
+        await interpret(heard)
+      } catch (e) {
+        if (!/cancel/i.test(e?.message || '')) { setError(e?.message || 'Could not hear that'); setPhase('error') } else onClose()
+      }
+      return
+    }
     if (!smart) {
       // On-device recognizer: one utterance, then the existing task parser.
       try {
@@ -74,24 +122,7 @@ export default function VoiceAssistant({ onClose, onTask, onCall }) {
     const heard = (await rec.current?.stop()) || text
     rec.current = null
     if (!heard.trim()) { setError('I didn’t catch anything. Try again.'); setPhase('error'); return }
-    setText(heard)
-    setPhase('thinking')
-    try {
-      const { result: r } = await cp('/api/assistant', { text: heard, ...localNow(), lists: lists.map((l) => ({ id: l.id, name: l.name })) }, { timeoutMs: 30000 })
-      // Single, clear intent: go straight to it.
-      if (r.kind === 'task' && r.task) return onTask({ ...r.task, listId: r.task.listId || undefined })
-      setResult(r)
-      setPhase('result')
-    } catch (e) {
-      // Server hiccup: still save the words as a task with the local parser.
-      try {
-        const task = await parseSpokenTask(heard)
-        onTask({ ...task, parseWarning: e.message })
-      } catch {
-        setError(e.message)
-        setPhase('error')
-      }
-    }
+    await interpret(heard)
   }
 
   const cancel = () => {
@@ -115,7 +146,7 @@ export default function VoiceAssistant({ onClose, onTask, onCall }) {
             <p className={`mt-3 min-h-[3.5rem] text-[17px] leading-snug ${text ? 'text-gray-900' : 'text-gray-400'}`}>
               {text || (smart ? `Say anything: "Remind me Friday at 9 to renew my license", or "Have ${assistantName()} call the dentist at 214 555 0100 to move my cleaning."` : 'Say the task, including the day and time.')}
             </p>
-            {smart ? (
+            {smart && !onDevice ? (
               <div className="flex gap-2 mt-5">
                 <button onClick={finish} className="flex-[2] bg-primary text-white font-semibold py-3.5 rounded-2xl">Done</button>
                 <button onClick={cancel} className="flex-1 bg-gray-100 text-gray-800 font-medium py-3.5 rounded-2xl">Cancel</button>
@@ -130,7 +161,8 @@ export default function VoiceAssistant({ onClose, onTask, onCall }) {
           <div className="flex items-center gap-3 py-4">
             <Loader2 className="animate-spin text-primary" size={22} />
             <div>
-              <p className="font-semibold text-gray-800">Working it out…</p>
+              <p className="font-semibold text-gray-800">{waking ? 'Waking up the server…' : 'Working it out…'}</p>
+              {waking && <p className="text-xs text-gray-500 mt-0.5">It was asleep. This takes up to a minute the first time.</p>}
               <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">&ldquo;{text}&rdquo;</p>
             </div>
           </div>

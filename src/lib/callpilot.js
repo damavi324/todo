@@ -39,6 +39,7 @@ async function request(url, path, { body, token, timeoutMs = 30000, method } = {
       signal: ctrl.signal,
     })
     const json = await res.json().catch(() => ({}))
+    if (res.ok) lastSeenUp = Date.now()
     if (!res.ok) {
       if (res.status === 401) {
         // Passcode changed on the server: show the connect screen instead of failing quietly.
@@ -68,7 +69,17 @@ export function cp(path, body, opts = {}) {
 export async function connectCallPilot(rawUrl, passcode) {
   const url = normalizeServerUrl(rawUrl)
   if (!url) throw new CallPilotError('Enter the server address', 0)
-  const health = await request(url, '/api/health', { timeoutMs: 15000 })
+  // A sleeping free cloud server can take up to a minute to answer the first time.
+  let health = null
+  const started = Date.now()
+  while (!health) {
+    try {
+      health = await request(url, '/api/health', { timeoutMs: 25000 })
+    } catch (err) {
+      if (Date.now() - started > 90000 || (err.status && ![502, 503, 504].includes(err.status))) throw err
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+  }
   if (!health?.ok) throw new CallPilotError('That address is not a CallPilot server.', 0)
   if (!health.api || health.api < 2) throw new CallPilotError('The server is an older version. Update CallPilot on the server, then try again.', 0)
   let token = ''
@@ -87,6 +98,39 @@ export async function connectCallPilot(rawUrl, passcode) {
   })
   return health
 }
+
+/**
+ * Wakes the server and waits until it answers. A free cloud server sleeps after
+ * ~15 idle minutes and takes 30-60 s to start, so we ping as soon as the app opens.
+ * Resolves true when it's up, false if it never answered within maxMs.
+ */
+let wakePromise = null
+let lastSeenUp = 0
+export function wakeServer({ maxMs = 100000, onWaiting } = {}) {
+  const { url } = cpSettings()
+  if (!url) return Promise.resolve(false)
+  if (Date.now() - lastSeenUp < 60000) return Promise.resolve(true)
+  if (wakePromise) return wakePromise
+  wakePromise = (async () => {
+    const started = Date.now()
+    let tries = 0
+    while (Date.now() - started < maxMs) {
+      try {
+        const h = await request(url, '/api/health', { timeoutMs: 20000 })
+        if (h?.ok) {
+          lastSeenUp = Date.now()
+          return true
+        }
+      } catch { /* still waking */ }
+      tries += 1
+      if (tries === 1) onWaiting?.()
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+    return false
+  })().finally(() => { wakePromise = null })
+  return wakePromise
+}
+export const markServerUp = () => { lastSeenUp = Date.now() }
 
 export function disconnectCallPilot() {
   useTaskStore.getState().updateSettings({ callpilotToken: '', callpilotConnected: false })

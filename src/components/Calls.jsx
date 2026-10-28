@@ -498,7 +498,7 @@ export function LogsSheet() {
 
 // ---------- screen ----------
 export default function Calls({ onOpenSettings }) {
-  const { view, connected, loadHistory, openLogs, unseenProblems, phoneState, phoneError, session, status } = useCallStore()
+  const { view, connected, loadHistory, openLogs, unseenProblems, phoneState, phoneError, session, status, serverState, wake } = useCallStore()
   const ready = isCallPilotReady()
   const problems = useTaskStore((st) => st.settings.callpilotProblems) || []
   useEffect(() => { if (ready) loadHistory() }, [ready, loadHistory])
@@ -509,9 +509,16 @@ export default function Calls({ onOpenSettings }) {
       <div className="pt-12 pb-3 flex items-center gap-2">
         <h1 className="text-2xl font-bold text-gray-900 mr-auto">Calls</h1>
         {ready && (
-          <span className={`flex items-center gap-1.5 text-xs ${connected ? 'text-emerald-700' : 'text-gray-400'}`}>
-            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500' : 'bg-gray-300'}`} />{connected ? 'Connected' : 'Connecting…'}
-          </span>
+          serverState === 'down' && !connected ? (
+            <button onClick={() => wake()} className="flex items-center gap-1.5 text-xs text-red-600">
+              <span className="w-2 h-2 rounded-full bg-red-500" />Server offline · Retry
+            </button>
+          ) : (
+            <span className={`flex items-center gap-1.5 text-xs ${connected ? 'text-emerald-700' : serverState === 'waking' ? 'text-amber-600' : 'text-gray-400'}`}>
+              <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500' : serverState === 'waking' ? 'bg-amber-400 animate-pulse' : 'bg-gray-300'}`} />
+              {connected ? 'Connected' : serverState === 'waking' ? 'Waking up server…' : 'Connecting…'}
+            </span>
+          )
         )}
         {ready && (
           <button onClick={openLogs} className="relative flex items-center gap-1 text-xs font-semibold rounded-full bg-white border border-gray-200 px-3 py-1.5">

@@ -1,7 +1,8 @@
 // App-wide call state. Lives outside the Calls screen so Pilot's questions reach you
 // on any screen, and a call keeps running while you look at your tasks.
 import { create } from 'zustand'
-import { cp, socketUrl, isCallPilotReady, assistantName } from '../lib/callpilot'
+import { cp, socketUrl, isCallPilotReady, assistantName, wakeServer } from '../lib/callpilot'
+import { archiveCall, archivedCall, mergeHistory, hasFinal, archivedList } from '../lib/callArchive'
 import CallSession from '../plugins/CallSession'
 
 const BAD = new Set(['failed', 'busy', 'no-answer', 'canceled'])
@@ -35,7 +36,9 @@ const initial = {
   pending: null, // { mode, to, goal, brief, plan } awaiting "Call now"
   draft: null, // prefill for the compose form
   detail: null,
-  history: [],
+  history: archivedList(), // phone copy first, so history shows instantly (even offline)
+  serverState: 'unknown', // unknown | waking | up | down
+  serverHistory: [],
   logs: [],
   unseenProblems: 0,
   logsOpen: false,
@@ -48,11 +51,26 @@ export const useCallStore = create((set, get) => ({
   ...initial,
 
   // ---------- live connection ----------
-  connect() {
+  /** Pings the server (waking it if it's asleep) and then opens the live connection. */
+  async wake() {
+    if (!isCallPilotReady()) return false
+    if (get().serverState === 'up' && ws && ws.readyState === 1) return true
+    const up = await wakeServer({ onWaiting: () => set({ serverState: 'waking' }) })
+    set({ serverState: up ? 'up' : 'down' })
+    if (up) get().connect(true)
+    return up
+  },
+
+  connect(awake = false) {
     if (!isCallPilotReady()) return
     wsWanted = true
     if (ws && ws.readyState <= 1) return
     clearTimeout(reconnectTimer)
+    if (!awake) {
+      // Make sure the server is awake first; wake() calls back into connect(true).
+      get().wake()
+      return
+    }
     try {
       ws = new WebSocket(socketUrl('/ui'))
     } catch {
@@ -60,18 +78,19 @@ export const useCallStore = create((set, get) => ({
       return
     }
     ws.onopen = () => {
-      set({ connected: true })
+      set({ connected: true, serverState: 'up' })
       // Warm up the phone line in the background so the first call (or a hand-off) is instant.
       setTimeout(() => { if (!device && !devicePromise) get().ensurePhone().catch(() => {}) }, 2000)
       get().loadHistory()
     }
+    ws.onerror = () => { /* onclose follows and retries */ }
     ws.onmessage = (e) => {
       try { get().handleEvent(JSON.parse(e.data)) } catch (err) { console.error(err) }
     }
     ws.onclose = () => {
       set({ connected: false })
       ws = null
-      if (wsWanted) reconnectTimer = setTimeout(() => get().connect(), 2500)
+      if (wsWanted) reconnectTimer = setTimeout(() => get().connect(), 2500) // goes through wake()
     }
   },
   disconnect() {
@@ -114,7 +133,10 @@ export const useCallStore = create((set, get) => ({
         if (ev.status === 'live' && !get().startedAt) patch.startedAt = Date.now()
         set(patch)
         if (ev.status === 'live') CallSession.update({ title: get().callTitle(), text: 'Live. Tap to open.' }).catch(() => {})
-        if (ev.status === 'ended' || BAD.has(ev.status)) get().endLocal(ev.status === 'failed' ? ev.detail : null)
+        if (ev.status === 'ended' || BAD.has(ev.status)) {
+          get().endLocal(ev.status === 'failed' ? ev.detail : null)
+          get().saveCallLocally(s.id)
+        }
         break
       }
       case 'line':
@@ -140,6 +162,7 @@ export const useCallStore = create((set, get) => ({
         break
       case 'summary':
         set({ summary: ev.summary, view: 'summary' })
+        get().saveCallLocally(s.id)
         get().refreshHistorySoon()
         break
       case 'notice':
@@ -221,7 +244,14 @@ export const useCallStore = create((set, get) => ({
     set({ draft, view: 'compose' })
   },
 
+  async ensureAwake() {
+    if (get().serverState === 'up' && get().connected) return
+    const up = await get().wake()
+    if (!up) throw new Error('The calling server isn’t answering. If it runs on your PC, make sure it’s on and npm run go is running.')
+  },
+
   async makePlan(body) {
+    await get().ensureAwake()
     const { plan } = await cp('/api/plan', body, { timeoutMs: 90000 })
     set({ pending: { ...body, plan }, view: 'plan' })
     return plan
@@ -230,6 +260,7 @@ export const useCallStore = create((set, get) => ({
   async startCall(body) {
     const fresh = { lines: [], partials: { you: '', them: '' }, suggestion: null, question: null, agentState: null, summary: null, startedAt: null, muted: false, onAudio: false, detail: null }
     let session
+    await get().ensureAwake()
     if (body.mode === 'copilot') await get().ensurePhone()
     try {
       ;({ session } = await cp('/api/sessions', body))
@@ -327,17 +358,43 @@ export const useCallStore = create((set, get) => ({
     clearTimeout(historyTimer)
     historyTimer = setTimeout(() => get().loadHistory(), 600)
   },
+  /** Copies a finished call (transcript, summary, plan, redial info) onto the phone. */
+  async saveCallLocally(id, tries = 0) {
+    try {
+      const { call } = await cp(`/api/sessions/${id}`)
+      archiveCall(call)
+      // The summary arrives a few seconds after hang-up; save again once it's there.
+      if (call.status === 'ended' && !call.summary && (call.transcript || []).length && tries < 6) {
+        setTimeout(() => get().saveCallLocally(id, tries + 1), 5000)
+      }
+      set({ history: mergeHistory(get().serverHistory || []) })
+    } catch { /* server asleep; we'll catch up on the next history load */ }
+  },
   async loadHistory() {
+    set({ history: mergeHistory(get().serverHistory || []) })
     if (!isCallPilotReady()) return
     try {
-      const { history } = await cp('/api/sessions')
-      set({ history })
-      const live = history.find((h) => !h.endedAt && ['live', 'dialing', 'ringing', 'initiated', 'queued', 'starting', 'answered'].includes(h.status))
+      const { history: serverHistory } = await cp('/api/sessions')
+      set({ serverHistory, history: mergeHistory(serverHistory) })
+      const live = serverHistory.find((h) => !h.endedAt && ['live', 'dialing', 'ringing', 'initiated', 'queued', 'starting', 'answered'].includes(h.status))
       if (live && !get().session && Date.now() - Date.parse(live.startedAt) < 2 * 60 * 60 * 1000) get().openDetail(live.id).catch(() => {})
+      // Back up any finished call the phone doesn't have yet (a few at a time).
+      const missing = serverHistory.filter((h) => (h.endedAt || BAD.has(h.status)) && !hasFinal(h)).slice(0, 8)
+      for (const h of missing) await get().saveCallLocally(h.id)
     } catch { /* offline; keep the old list */ }
   },
   async openDetail(id) {
-    const { call } = await cp(`/api/sessions/${id}`)
+    let call = null
+    try {
+      ;({ call } = await cp(`/api/sessions/${id}`))
+    } catch (err) {
+      // Server asleep, offline, or it forgot this call: use the phone's copy.
+      call = archivedCall(id)
+      if (!call) throw err
+    }
+    if (!call) call = archivedCall(id)
+    if (!call) throw new Error('That call is no longer available.')
+    archiveCall(call)
     const stillGoing = !call.endedAt && call.status && call.status !== 'ended' && !BAD.has(call.status)
     if (stillGoing && get().session?.id !== call.id) {
       // App was closed mid-call: pick the live call back up.

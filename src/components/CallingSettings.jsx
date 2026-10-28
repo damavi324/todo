@@ -53,7 +53,7 @@ export default function CallingSettings() {
         <p className="text-xs text-green-700 bg-green-50 rounded-xl px-3 py-2.5 flex gap-2"><CheckCircle2 size={14} className="flex-shrink-0 mt-0.5" />{ok || `Connected to ${settings.callpilotUrl}`}</p>
       )}
       <button type="submit" disabled={busy || !url.trim()} className="w-full bg-primary text-white text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">
-        {busy && <Loader2 size={16} className="animate-spin" />}{connected ? 'Reconnect' : 'Connect'}
+        {busy && <Loader2 size={16} className="animate-spin" />}{busy ? 'Connecting… (a sleeping server takes up to a minute)' : connected ? 'Reconnect' : 'Connect'}
       </button>
       {settings.callpilotConnected && (
         <button type="button" onClick={disconnect} className="w-full border border-red-200 text-red-500 text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2">
