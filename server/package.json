@@ -1,0 +1,21 @@
+{
+  "name": "callpilot",
+  "version": "0.1.0",
+  "description": "In-app calling with a live AI copilot and an autonomous AI calling agent (Twilio + Deepgram + Claude).",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "go": "node src/go.js",
+    "start": "node src/server.js",
+    "check": "node src/check.js",
+    "test": "node test/simulate.js",
+    "voices": "node src/voices.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "@twilio/voice-sdk": "^2.12.0"
+  }
+}
