@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useTaskStore } from '../store/useTaskStore'
 import { syncReminders, requestNotificationPermission } from '../lib/notifications'
 import { createCalendarEvent, updateCalendarEvent, calendarActive, reportCalendarError } from '../lib/googleCalendar'
-import { X, Flag, Calendar, Clock, AlignLeft, List } from 'lucide-react'
+import { X, Flag, Calendar, Clock, AlignLeft, List, Phone } from 'lucide-react'
+import { formatNumber, assistantName } from '../lib/callpilot'
 
 const PRIORITIES = [
   { value: 'high', label: 'High', color: '#EF4444' },
@@ -21,14 +22,21 @@ export default function AddTaskModal({ onClose, editTask, draft }) {
   const [dueDate, setDueDate] = useState(seed.dueDate || '')
   const [dueTime, setDueTime] = useState(seed.dueTime || '')
   const [priority, setPriority] = useState(seed.priority || 'none')
-  const [listId, setListId] = useState(editTask?.listId || 'inbox')
+  const { selectedList } = useTaskStore()
+  const smartLists = ['today', 'scheduled', 'all']
+  const [listId, setListId] = useState(
+    editTask?.listId || (draft?.listId && lists.some((l) => l.id === draft.listId) ? draft.listId : null)
+      || (!smartLists.includes(selectedList) && lists.some((l) => l.id === selectedList) ? selectedList : 'inbox')
+  )
+  // A phone call Pilot should make for this task (from the voice assistant).
+  const [call, setCall] = useState(seed.call || null)
   const [saving, setSaving] = useState(false)
 
   const handleSave = async () => {
     if (!title.trim()) return
     setSaving(true)
 
-    const taskData = { title: title.trim(), notes, dueDate, dueTime, priority, listId }
+    const taskData = { title: title.trim(), notes, dueDate, dueTime, priority, listId, call: call || null }
 
     try {
       let task
@@ -134,6 +142,17 @@ export default function AddTaskModal({ onClose, editTask, draft }) {
               ))}
             </div>
           </div>
+
+          {call && (
+            <div className="flex items-start gap-3 rounded-xl bg-emerald-50 px-3 py-2.5">
+              <Phone size={16} className="text-emerald-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0 text-sm">
+                <p className="font-medium text-emerald-900">{assistantName()} call attached</p>
+                <p className="text-emerald-800/80 truncate">{call.contact || formatNumber(call.to) || 'Number to add'}{call.goal ? ` · ${call.goal}` : ''}</p>
+              </div>
+              <button type="button" onClick={() => setCall(null)} aria-label="Remove the call" className="text-emerald-700 p-1"><X size={14} /></button>
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             <List size={16} className="text-gray-400 flex-shrink-0" />

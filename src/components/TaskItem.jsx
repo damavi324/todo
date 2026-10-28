@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useTaskStore } from '../store/useTaskStore'
-import { Trash2, Calendar, Flag, ChevronDown, ChevronUp } from 'lucide-react'
+import { Trash2, Calendar, Flag, ChevronDown, ChevronUp, Phone } from 'lucide-react'
+import { useCallStore } from '../store/useCallStore'
+import { assistantName } from '../lib/callpilot'
 import { syncReminders } from '../lib/notifications'
 import { deleteCalendarEvent, calendarActive, reportCalendarError } from '../lib/googleCalendar'
 import { parseLocalDate, startOfToday, addDays } from '../lib/dates'
@@ -8,7 +10,19 @@ import { parseLocalDate, startOfToday, addDays } from '../lib/dates'
 const PRIORITY_COLOR = { high: '#EF4444', medium: '#F97316', low: '#3B82F6', none: '#D1D5DB' }
 
 export default function TaskItem({ task, onEdit }) {
-  const { toggleTask, deleteTask, dismissCalendarEvent, settings } = useTaskStore()
+  const { toggleTask, deleteTask, dismissCalendarEvent, settings, setAppView } = useTaskStore()
+
+  // Hand the task's attached call (or the task itself) to Pilot.
+  const handleCall = () => {
+    const c = task.call || {}
+    useCallStore.getState().setDraft({
+      mode: c.mode || 'agent',
+      to: c.to || '',
+      goal: c.goal || task.title,
+      brief: [c.contact && `Calling: ${c.contact}`, c.details, task.notes].filter(Boolean).join('\n'),
+    })
+    setAppView('calls')
+  }
   const [expanded, setExpanded] = useState(false)
 
   const handleToggle = () => {
@@ -65,6 +79,13 @@ export default function TaskItem({ task, onEdit }) {
             </div>
           )}
         </div>
+
+        {task.call && !task.completed && (
+          <button onClick={handleCall} aria-label={`Have ${assistantName()} make this call`}
+            className="flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 rounded-full px-2.5 py-1 flex-shrink-0">
+            <Phone size={12} />Call
+          </button>
+        )}
 
         {task.priority !== 'none' && (
           <Flag size={14} style={{ color: PRIORITY_COLOR[task.priority] }} className="flex-shrink-0" />

@@ -14,8 +14,29 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(VoiceReminderPlugin.class);
         registerPlugin(SpeechCapturePlugin.class);
+        registerPlugin(CallSessionPlugin.class);
         super.onCreate(savedInstanceState);
         VoiceReminderHelper.ensureChannel(this);
+    }
+
+    // During a call, keep the WebView (and its call audio and live updates) running when the
+    // screen locks or the app goes to the background.
+    @Override
+    public void onPause() {
+        super.onPause();
+        keepWebViewAliveDuringCall();
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        keepWebViewAliveDuringCall();
+    }
+
+    private void keepWebViewAliveDuringCall() {
+        if (!CallSessionService.isRunning() || getBridge() == null || getBridge().getWebView() == null) return;
+        getBridge().getWebView().onResume();
+        getBridge().getWebView().resumeTimers();
     }
 
     @Override
