@@ -421,8 +421,24 @@ server.on('upgrade', (req, socket, head) => {
   target.handleUpgrade(req, socket, head, (ws) => target.emit('connection', ws, req));
 });
 
-server.listen(config.port, () => {
+/**
+ * Google Cloud Run doesn't hand the service its public address, but it's predictable:
+ * https://<service>-<project number>.<region>.run.app. Work it out from the metadata server.
+ */
+async function detectCloudRunHost() {
+  if (config.publicHost || !process.env.K_SERVICE) return;
+  const md = (p) => fetch(`http://metadata.google.internal/computeMetadata/v1/${p}`, { headers: { 'Metadata-Flavor': 'Google' }, signal: AbortSignal.timeout(3000) }).then((r) => (r.ok ? r.text() : Promise.reject(new Error(`metadata ${r.status}`))));
+  try {
+    const [num, region] = await Promise.all([md('project/numeric-project-id'), md('instance/region')]);
+    config.publicHost = `${process.env.K_SERVICE}-${num.trim()}.${region.trim().split('/').pop()}.run.app`;
+  } catch (err) {
+    console.warn(`[cloud run] could not work out the public address (${err.message}); set PUBLIC_HOST.`);
+  }
+}
+
+server.listen(config.port, async () => {
   log(`CallPilot running on http://localhost:${config.port}`);
+  await detectCloudRunHost();
   if (config.publicHost) log(`Public URL: https://${config.publicHost}`);
   const problems = configProblems();
   if (problems.length) {
