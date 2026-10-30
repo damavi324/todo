@@ -1,4 +1,6 @@
-# Run CallPilot on Google Cloud Run (free tier)
+# Run CallPilot on Google Cloud Run (kept for later)
+
+Render is the host to use for now. See `DEPLOY-RENDER.md`. This guide stays so the same server can move to Cloud Run later without a rewrite. Do not run both at once: whichever server starts last points Twilio at itself.
 
 The server sleeps when idle and wakes in a few seconds when the phone app opens.
 At personal use (a few calls a day) it stays inside Cloud Run's monthly free allowance.

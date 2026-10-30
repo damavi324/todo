@@ -8,7 +8,8 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     branch: feature/calling-ai-voice
-    autoDeploy: true
+    # Cloud Run stays available in server/DEPLOY-CLOUD-RUN.md for a later switch.
+    autoDeployTrigger: commit
     buildFilter:
       paths: ['server/**']
     # free: sleeps after ~15 idle minutes and wakes in 30-60 s when the app opens.
