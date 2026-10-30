@@ -97,12 +97,12 @@ export function speakConfig(override = {}) {
     return Number.isFinite(n) && v !== '' && v != null ? Math.min(hi, Math.max(lo, n)) : def;
   };
   const voice = d.agentVoice || 'flux-alexis-en';
-  const fluxVoice = voice.startsWith('flux') ? voice : 'flux-alexis-en';
+  const fluxVoice = voice.startsWith('flux') ? voice : 'flux-cliff-en';
   const flux = {
     provider: {
       type: 'deepgram', version: 'v2', model: fluxVoice,
-      speed: num(d.agentSpeed, 0.5, 1.5, 1.05),
-      expressivity: Math.round(num(d.agentExpressivity, -2, 2, 1)),
+      speed: num(d.agentSpeed, 0.5, 1.5, 1),
+      expressivity: Math.round(num(d.agentExpressivity, -2, 2, 0)),
     },
   };
   const tts = d.agentTts || (voice.startsWith('aura') ? 'aura' : 'flux');

@@ -347,8 +347,9 @@ try {
   assert.deepEqual(st.audio.input, { encoding: 'mulaw', sample_rate: 8000 });
   assert.deepEqual(st.audio.output, { encoding: 'mulaw', sample_rate: 8000, container: 'none' });
   assert.deepEqual(st.agent.listen.provider, { type: 'deepgram', model: 'flux-general-en', version: 'v2' });
-  assert.deepEqual(st.agent.speak.provider, { type: 'deepgram', version: 'v2', model: 'flux-alexis-en', speed: 1.05, expressivity: 1 });
+  assert.deepEqual(st.agent.speak.provider, { type: 'deepgram', version: 'v2', model: 'flux-cliff-en', speed: 1, expressivity: 0 });
   assert.match(st.agent.think.prompt, /usually one sentence, at most two/);
+  assert.match(st.agent.think.prompt, /Do not ask "what's your name\?"/);
   assert.deepEqual(st.agent.think.provider, { type: 'anthropic', model: 'claude-haiku-4-5' });
   assert.deepEqual(st.agent.think.functions.map((f) => f.name), ['ask_owner', 'press_digits', 'finish_call']);
   assert.match(st.agent.greeting, /^Hi, this is Pilot, an AI assistant calling on behalf of Mk\. This call is being transcribed\.$/);

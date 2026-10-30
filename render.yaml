@@ -43,3 +43,9 @@ services:
         sync: false
       - key: AGENT_TTS
         value: flux
+      - key: AGENT_VOICE
+        value: flux-cliff-en
+      - key: AGENT_SPEED
+        value: "1"
+      - key: AGENT_EXPRESSIVITY
+        value: "0"

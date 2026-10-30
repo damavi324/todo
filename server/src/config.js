@@ -42,7 +42,7 @@ export const config = {
     agentUrl: clean(e.DEEPGRAM_AGENT_URL) || 'wss://agent.deepgram.com/v1/agent/converse',
     listenModel: clean(e.DEEPGRAM_LISTEN_MODEL) || 'nova-3',
     agentListenModel: clean(e.AGENT_LISTEN_MODEL) || 'flux-general-en',
-    agentVoice: clean(e.AGENT_VOICE) || 'flux-alexis-en',
+    agentVoice: clean(e.AGENT_VOICE) || 'flux-cliff-en',
     // Voice engine: flux | aura | cartesia (Cartesia is managed by Deepgram, no extra account)
     agentTts: (clean(e.AGENT_TTS) || '').toLowerCase(),
     agentSpeed: clean(e.AGENT_SPEED),

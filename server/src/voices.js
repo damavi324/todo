@@ -10,7 +10,8 @@ const owner = config.ownerName;
 const LINE = `Hi, this is ${config.assistantName}, an AI assistant calling on behalf of ${owner}. Um, I'm hoping to move a cleaning appointment to a Monday morning. Do you have anything open?`;
 
 const CANDIDATES = [
-  { file: '1-flux-alexis-lively', label: 'Flux Alexis, lively (current default)', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-alexis-en  AGENT_EXPRESSIVITY=1', o: { agentTts: 'flux', agentVoice: 'flux-alexis-en', agentExpressivity: '1' } },
+  { file: '1-flux-alexis-lively', label: 'Flux Alexis, lively (previous default)', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-alexis-en  AGENT_EXPRESSIVITY=1', o: { agentTts: 'flux', agentVoice: 'flux-alexis-en', agentExpressivity: '1' } },
+  { file: '1b-flux-cliff', label: 'Flux Cliff, deep male (current default)', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-cliff-en  AGENT_EXPRESSIVITY=0', o: { agentTts: 'flux', agentVoice: 'flux-cliff-en', agentExpressivity: '0' } },
   { file: '2-flux-alexis-animated', label: 'Flux Alexis, most animated', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-alexis-en  AGENT_EXPRESSIVITY=2', o: { agentTts: 'flux', agentVoice: 'flux-alexis-en', agentExpressivity: '2' } },
   { file: '3-flux-kit-lively', label: 'Flux Kit, lively', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-kit-en  AGENT_EXPRESSIVITY=1', o: { agentTts: 'flux', agentVoice: 'flux-kit-en', agentExpressivity: '1' } },
   { file: '4-aura-thalia', label: 'Aura 2 Thalia', env: 'AGENT_TTS=aura  AGENT_VOICE=aura-2-thalia-en', o: { agentTts: 'aura', agentVoice: 'aura-2-thalia-en' } },
