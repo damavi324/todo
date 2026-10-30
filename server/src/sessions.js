@@ -77,11 +77,13 @@ export function slog(s, level, text) {
   persist(s);
 }
 
-export function createSession({ mode, to, goal, brief, plan }) {
+export function createSession({ mode, to, goal, brief, plan, owner, about }) {
   const s = {
     id: crypto.randomUUID(),
     mode, // 'copilot' | 'agent'
     to,
+    ownerName: String(owner || '').trim().slice(0, 80) || config.ownerName,
+    about: String(about || '').trim().slice(0, 8000),
     goal: (goal || '').trim(),
     brief: (brief || '').trim(),
     plan: plan || null,
@@ -184,7 +186,7 @@ export function utteranceAssembler(s, speaker) {
 const transcriptText = (s, maxLines = 40) =>
   s.transcript
     .slice(-maxLines)
-    .map((l) => `${l.speaker === 'you' ? config.ownerName : l.speaker === 'agent' ? 'AI agent' : 'Other party'}: ${l.text}`)
+    .map((l) => `${l.speaker === 'you' ? (s.ownerName || config.ownerName) : l.speaker === 'agent' ? 'AI agent' : 'Other party'}: ${l.text}`)
     .join('\n');
 
 // ---------- Live suggestions (copilot) ----------
@@ -209,12 +211,12 @@ export async function runSuggestion(s) {
       maxTokens: 300,
       timeoutMs: 12000,
       system:
-        `You are a real-time call copilot for ${config.ownerName}, who is on a live phone call right now. ` +
-        `Help ${config.ownerName} reach the goal. Be extremely brief: they glance at your card mid-conversation. ` +
+        `You are a real-time call copilot for ${s.ownerName || config.ownerName}, who is on a live phone call right now. ` +
+        `Help ${s.ownerName || config.ownerName} reach the goal. Be extremely brief: they glance at your card mid-conversation. ` +
         'Reply ONLY with JSON: {"say":["<what to say next, under 20 words>", "<optional alternative>"],"note":"<key fact, warning, or empty>"}. ' +
         'Suggestions must be things the user can say out loud verbatim. Flag anything that commits money, signs up, cancels, or shares sensitive data.',
       prompt:
-        `Goal: ${s.goal || '(not given)'}\nContext from ${config.ownerName}: ${(s.brief || '(none)').slice(0, 6000)}\n\nTranscript so far:\n${transcriptText(s)}\n\nWhat should ${config.ownerName} say next?`,
+        `Goal: ${s.goal || '(not given)'}\nAbout ${s.ownerName || config.ownerName} (every call): ${(s.about || '(none)').slice(0, 2000)}\nThis call: ${(s.brief || '(none)').slice(0, 6000)}\n\nTranscript so far:\n${transcriptText(s)}\n\nWhat should ${s.ownerName || config.ownerName} say next?`,
     });
     const json = parseJson(text) || { say: [text.slice(0, 160)], note: '' };
     const suggestion = {
@@ -297,11 +299,11 @@ async function summarize(s) {
       maxTokens: 700,
       timeoutMs: 30000,
       system:
-        `You write post-call notes for ${config.ownerName}'s personal assistant. Be factual; never invent details not in the transcript. ` +
+        `You write post-call notes for ${s.ownerName || config.ownerName}'s personal assistant. Be factual; never invent details not in the transcript. ` +
         'Reply ONLY with JSON: {"outcome":"done|needs_you|failed|no_answer|voicemail","headline":"<under 12 words>","summary":"<2-4 sentences>","key_facts":["dates, times, prices, names, reference numbers"],"action_items":["<follow-ups for ' +
-        config.ownerName +
+        (s.ownerName || config.ownerName) +
         '>"]}',
-      prompt: `Call to ${s.to}. Goal: ${s.goal || '(not given)'}\nContext: ${(s.brief || '(none)').slice(0, 8000)}
+      prompt: `Call to ${s.to}. Goal: ${s.goal || '(not given)'}\nAbout them: ${(s.about || '(none)').slice(0, 2000)}\nThis call: ${(s.brief || '(none)').slice(0, 8000)}
 Plan objective: ${s.plan?.objective || '(none)'}\nMode: ${s.mode}\n\nTranscript:\n${transcriptText(s, 400)}`,
     });
     s.summary = parseJson(text) || { outcome: 'done', headline: 'Call notes', summary: text, action_items: [] };

@@ -143,7 +143,18 @@ export function socketUrl(path) {
 }
 
 export const assistantName = () => useTaskStore.getState().settings.callpilotAssistant || 'Pilot'
-export const ownerName = () => useTaskStore.getState().settings.callpilotOwner || useTaskStore.getState().settings.userName || 'you'
+export const ownerName = () => {
+  const s = useTaskStore.getState().settings
+  return (s.callerName || '').trim() || (s.userName || '').trim() || s.callpilotOwner || 'you'
+}
+/** Name and standing details sent with every call. The call screen only adds what is specific to that call. */
+export function callerContext() {
+  const s = useTaskStore.getState().settings
+  return {
+    owner: (s.callerName || s.userName || '').trim(),
+    about: (s.callerAbout || '').trim(),
+  }
+}
 
 export function formatNumber(e164) {
   const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(e164 || '')

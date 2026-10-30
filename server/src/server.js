@@ -272,7 +272,7 @@ async function route(req, res) {
     if (!String(body.goal || '').trim()) return send(res, 400, { error: 'Tell the agent what the call is for' });
     try {
       log(`[plan] writing call plan (${String(body.brief || '').length} chars of details)`);
-      const plan = await generatePlan({ to, goal: body.goal, brief: body.brief });
+      const plan = await generatePlan({ to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about });
       log(`[plan] ready: ${plan.objective}`);
       return send(res, 200, { plan });
     } catch (err) {
@@ -293,7 +293,7 @@ async function route(req, res) {
     body.goal = String(body.goal || '').slice(0, 2000);
     body.brief = String(body.brief || '').slice(0, 40000);
     if (mode === 'agent' && !body.goal?.trim()) return send(res, 400, { error: 'Tell the agent what the call is for' });
-    const s = createSession({ mode, to, goal: body.goal, brief: body.brief, plan: mode === 'agent' ? normalizePlan(body.plan) : null });
+    const s = createSession({ mode, to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, plan: mode === 'agent' ? normalizePlan(body.plan) : null });
     if (mode === 'agent') {
       try {
         const call = await createCall({

@@ -27,7 +27,7 @@ export function plannerSystem() {
   const owner = config.ownerName;
   return [
     `You are the call planner for ${owner}'s personal assistant. An AI voice agent named ${config.assistantName} will phone someone on ${owner}'s behalf, and your plan is its briefing.`,
-    `Read ${owner}'s goal and details carefully. Details may be long, rambling, or dictated by voice with transcription errors; extract what matters and ignore filler.`,
+    `Read ${owner}'s standing details and the note for this call. The standing details are true on every call. The note is only for this call. Either may be long, rambling, or dictated by voice with transcription errors; extract what matters and ignore filler.`,
     'Rules:',
     '- Use only facts that appear in the goal or details. Never invent names, dates, prices, account numbers or preferences. If something important is unknown, put it in missing_info.',
     `- kind is "personal" when ${owner} is calling a specific person they already know (a friend, family, or anyone named as the person to reach). kind is "business" when calling a company, office, restaurant, or any place where the person who answers is unknown.`,
@@ -39,9 +39,11 @@ export function plannerSystem() {
   ].join('\n');
 }
 
-export async function generatePlan({ to, goal, brief }) {
-  const details = String(brief || '').slice(0, MAX_DETAILS);
-  const prompt = `Phone number being called: ${to}\n\nGoal: ${goal || '(not given)'}\n\nDetails from ${config.ownerName}:\n${details || '(none)'}`;
+export async function generatePlan({ to, goal, brief, owner, about }) {
+  const name = String(owner || '').trim() || config.ownerName;
+  const standing = String(about || '').trim().slice(0, 8000);
+  const details = String(brief || goal || '').slice(0, MAX_DETAILS);
+  const prompt = `Phone number being called: ${to}\n\nAbout ${name} (true on every call; do not ask the other person for these):\n${standing || '(none)'}\n\nThis call only:\n${details || '(not given)'}`;
   let text;
   try {
     text = await complete({ model: config.anthropic.smartModel, system: plannerSystem(), prompt, maxTokens: 1800, timeoutMs: 60000 });

@@ -65,13 +65,14 @@ export function handleListenStream(twilioWs) {
 // =====================================================================
 
 function agentPrompt(s) {
-  const owner = config.ownerName;
+  const owner = (s.ownerName || '').trim() || config.ownerName;
   return [
     `You are ${config.assistantName}, an AI assistant placing a phone call on behalf of ${owner}. You are speaking on a live phone call.`,
     '',
-    `GOAL OF THIS CALL: ${s.goal || 'See context.'}`,
+    s.about ? `ABOUT ${owner.toUpperCase()} (true on every call; use these facts, and do not ask the other person for them):\n${s.about}\n` : '',
+    `THIS CALL: ${s.goal || 'See context.'}`,
     s.plan ? planToPrompt(s.plan) : '',
-    `RAW DETAILS FROM ${owner.toUpperCase()} (reference only; the plan above takes priority): ${(s.brief || '(none)').slice(0, s.plan ? 5000 : 9000)}`,
+    `THIS CALL, IN ${owner.toUpperCase()}'S WORDS (reference only; the plan above takes priority): ${(s.brief || s.goal || '(none)').slice(0, s.plan ? 5000 : 9000)}`,
     '',
     'HOW TO TALK (you are on the phone; sound like a relaxed, friendly person, not a script)',
     '- Keep each turn SHORT: usually one sentence, at most two. Ask one thing at a time, then stop and let them answer.',
@@ -87,7 +88,7 @@ function agentPrompt(s) {
     `- If the goal or details name a specific person ${owner} already knows, this is a personal call. Do not ask "what's your name?" You already know who they are. If a different person answers, ask to speak to the person you called.`,
     `- If this is a business, a front desk, or anyone whose name was not given, you may ask once, near the end, who you are speaking with so you can tell ${owner}. Skip that if they already introduced themselves.`,
     `- Never ask the other person for ${owner}'s name. You already have it.`,
-    '- Do not ask for any fact the goal or details already contain.',
+    '- Do not ask for any fact already in the standing details or in this call.',
     '',
     'RULES',
     `- Only agree to things that clearly fit the goal and context. If an offer or question falls outside them (a different time, a price, a fee, a policy, a decision), say you need to check with ${owner}, then call ask_owner.`,
@@ -119,10 +120,10 @@ function agentSettings(s) {
         functions: [
           {
             name: 'ask_owner',
-            description: `Ask ${config.ownerName} a question in real time and wait for the answer. Use when you need information or a decision you do not have.`,
+            description: `Ask ${s.ownerName || config.ownerName} a question in real time and wait for the answer. Use when you need information or a decision you do not have.`,
             parameters: {
               type: 'object',
-              properties: { question: { type: 'string', description: `Short, specific question for ${config.ownerName}.` } },
+              properties: { question: { type: 'string', description: `Short, specific question for ${s.ownerName || config.ownerName}.` } },
               required: ['question'],
             },
           },
@@ -151,7 +152,7 @@ function agentSettings(s) {
       },
       speak: speakConfig(),
       greeting:
-        `Hi, this is ${config.assistantName}, an AI assistant calling on behalf of ${config.ownerName}. ` +
+        `Hi, this is ${config.assistantName}, an AI assistant calling on behalf of ${s.ownerName || config.ownerName}. ` +
         `This call is being transcribed. ${s.plan?.opening || ''}`.trim(),
     },
   };
@@ -195,7 +196,8 @@ export function handleAgentStream(twilioWs) {
       emit(session, 'agent_state', { state: 'waiting_for_you', detail: args.question });
       const answer = await askOwner(session, args.question || 'Can you help?');
       emit(session, 'agent_state', { state: 'talking' });
-      respond(answer ? `${config.ownerName} says: ${answer}` : `${config.ownerName} did not answer in time. Do not agree to anything new; say ${config.ownerName} will follow up, and continue or wrap up politely.`);
+      const who = session.ownerName || config.ownerName;
+      respond(answer ? `${who} says: ${answer}` : `${who} did not answer in time. Do not agree to anything new; say ${who} will follow up, and continue or wrap up politely.`);
     } else if (fn.name === 'press_digits') {
       const digits = String(args.digits || '').replace(/[^0-9*#wW,]/g, '');
       emit(session, 'agent_state', { state: 'pressing_keys', detail: digits });
@@ -321,7 +323,7 @@ export function handleAgentStream(twilioWs) {
 // =====================================================================
 export async function joinAgentCall(s) {
   if (!s.callSid) throw new Error('Call is not connected yet');
-  s._agent?.say(`One moment, I'm connecting ${config.ownerName} to the call now.`);
+  s._agent?.say(`One moment, I'm connecting ${s.ownerName || config.ownerName} to the call now.`);
   emit(s, 'agent_state', { state: 'handing_off' });
   await new Promise((r) => setTimeout(r, 3500));
   s.joined = true;

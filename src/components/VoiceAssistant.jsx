@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Phone, CalendarPlus, RotateCcw, X, Flag } from 'lucide-react'
-import { cp, isCallPilotReady, assistantName, formatNumber } from '../lib/callpilot'
+import { cp, isCallPilotReady, assistantName, formatNumber, callerContext } from '../lib/callpilot'
 import { startDictation } from '../lib/dictation'
 import { parseSpokenTask } from '../lib/voiceTask'
 import { toLocalYMD } from '../lib/dates'
@@ -51,7 +51,7 @@ export default function VoiceAssistant({ onClose, onTask, onCall }) {
         setWaking(false)
         if (!up) throw new Error('The calling server didn’t wake up, so I used the basic parser.')
       }
-      const { result: r } = await cp('/api/assistant', { text: heard, ...localNow(), lists: lists.map((l) => ({ id: l.id, name: l.name })) }, { timeoutMs: 45000 })
+      const { result: r } = await cp('/api/assistant', { text: heard, ...callerContext(), ...localNow(), lists: lists.map((l) => ({ id: l.id, name: l.name })) }, { timeoutMs: 45000 })
       // Single, clear intent: go straight to it.
       if (r.kind === 'task' && r.task) return onTask({ ...r.task, listId: r.task.listId || undefined })
       setResult(r)

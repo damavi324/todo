@@ -7,6 +7,7 @@ import { connectCallPilot, disconnectCallPilot, normalizeServerUrl } from '../li
 /** Settings → Calling: connect the app to your CallPilot server. */
 export default function CallingSettings() {
   const settings = useTaskStore((s) => s.settings)
+  const updateSettings = useTaskStore((s) => s.updateSettings)
   const [url, setUrl] = useState(settings.callpilotUrl || '')
   const [passcode, setPasscode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -39,6 +40,7 @@ export default function CallingSettings() {
   }
 
   return (
+    <div>
     <form onSubmit={connect} className="px-5 py-4 space-y-3">
       <p className="text-xs text-gray-500 flex gap-2">
         <Phone size={14} className="flex-shrink-0 mt-0.5 text-emerald-600" />
@@ -61,5 +63,31 @@ export default function CallingSettings() {
         </button>
       )}
     </form>
+    <div className="px-5 pb-4 space-y-3 border-t border-gray-100">
+      <p className="text-xs font-semibold text-gray-500 pt-4">About you</p>
+      <p className="text-xs text-gray-500">Pilot uses this on every call. What you type on a single call is only for that call.</p>
+      <label className="block">
+        <span className="text-xs font-medium text-gray-600">Your name</span>
+        <input
+          value={settings.callerName ?? ''}
+          onChange={(e) => updateSettings({ callerName: e.target.value })}
+          placeholder={settings.userName || 'Your name'}
+          maxLength={80}
+          className="mt-1 w-full text-sm bg-gray-50 rounded-xl px-3 py-2.5 outline-none border border-gray-200 focus:border-primary"
+        />
+      </label>
+      <label className="block">
+        <span className="text-xs font-medium text-gray-600">Always okay to use</span>
+        <textarea
+          value={settings.callerAbout ?? ''}
+          onChange={(e) => updateSettings({ callerAbout: e.target.value })}
+          rows={4}
+          maxLength={4000}
+          placeholder="Name you go by, city, account names, times that usually work. Leave out anything that changes from call to call."
+          className="mt-1 w-full text-sm bg-gray-50 rounded-xl px-3 py-2.5 outline-none border border-gray-200 focus:border-primary resize-y"
+        />
+      </label>
+    </div>
+    </div>
   )
 }

@@ -26,8 +26,7 @@ const SCHEMA = `{
   "question": "if kind is unclear: the single question to ask, else empty"
 }`;
 
-function systemPrompt() {
-  const owner = config.ownerName;
+function systemPrompt(owner = config.ownerName) {
   return [
     `You are the voice front door of ${owner}'s personal assistant app. ${owner} just spoke one request (transcribed by speech-to-text, so expect small errors and filler words).`,
     'Decide what they want:',
@@ -46,7 +45,7 @@ function systemPrompt() {
 
 const s = (v, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
-export async function interpret({ text, now, timezone, weekday, lists }) {
+export async function interpret({ text, now, timezone, weekday, lists, owner, about }) {
   const spoken = s(text, 6000);
   if (!spoken) throw new Error('Nothing was heard');
   const listText = Array.isArray(lists) && lists.length
@@ -56,9 +55,10 @@ export async function interpret({ text, now, timezone, weekday, lists }) {
     `Current local date/time: ${s(now, 40) || new Date().toISOString()} (${s(weekday, 12)}), time zone ${s(timezone, 60) || 'unknown'}.`,
     `Task lists: ${listText}`,
     '',
+    about ? `About ${s(owner, 80) || config.ownerName}, true on every call: ${s(about, 4000)}` : '',
     `They said: "${spoken}"`,
   ].join('\n');
-  const reply = await complete({ model: config.anthropic.fastModel, system: systemPrompt(), prompt, maxTokens: 900, timeoutMs: 25000 });
+  const reply = await complete({ model: config.anthropic.fastModel, system: systemPrompt(s(owner, 80) || config.ownerName), prompt, maxTokens: 900, timeoutMs: 25000 });
   return normalize(parseJson(reply), spoken, lists);
 }
 

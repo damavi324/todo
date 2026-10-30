@@ -13,6 +13,9 @@ const DEFAULT_SETTINGS = {
   notificationRepeatMinutes: 10,
   voiceRemindersEnabled: true,
   userName: 'MK',
+  // Standing facts Pilot may use on every call. The note on a single call stays on that call.
+  callerName: '',
+  callerAbout: '',
   googleCalendarEnabled: false,
   googleCalendarId: 'primary',
   // Calling server (CallPilot)

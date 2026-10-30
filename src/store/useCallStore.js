@@ -1,7 +1,7 @@
 // App-wide call state. Lives outside the Calls screen so Pilot's questions reach you
 // on any screen, and a call keeps running while you look at your tasks.
 import { create } from 'zustand'
-import { cp, socketUrl, isCallPilotReady, assistantName, wakeServer } from '../lib/callpilot'
+import { cp, socketUrl, isCallPilotReady, assistantName, wakeServer, callerContext } from '../lib/callpilot'
 import { archiveCall, archivedCall, mergeHistory, hasFinal, archivedList } from '../lib/callArchive'
 import CallSession from '../plugins/CallSession'
 
@@ -252,7 +252,7 @@ export const useCallStore = create((set, get) => ({
 
   async makePlan(body) {
     await get().ensureAwake()
-    const { plan } = await cp('/api/plan', body, { timeoutMs: 90000 })
+    const { plan } = await cp('/api/plan', { ...callerContext(), ...body }, { timeoutMs: 90000 })
     set({ pending: { ...body, plan }, view: 'plan' })
     return plan
   },
@@ -263,7 +263,7 @@ export const useCallStore = create((set, get) => ({
     await get().ensureAwake()
     if (body.mode === 'copilot') await get().ensurePhone()
     try {
-      ;({ session } = await cp('/api/sessions', body))
+      ;({ session } = await cp('/api/sessions', { ...callerContext(), ...body }))
     } catch (err) {
       throw err
     }

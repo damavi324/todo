@@ -86,14 +86,21 @@ function DictationField({ label, value, onChange, placeholder, rows = 2, optiona
   )
 }
 const join = (a, b) => [a, b].filter(Boolean).join(a && b ? ' ' : '')
+function callText(draft) {
+  const goal = (draft?.goal || '').trim()
+  const brief = (draft?.brief || '').trim()
+  if (!goal) return brief
+  if (!brief || brief === goal) return goal
+  if (brief.startsWith(goal)) return brief
+  return `${goal}\n\n${brief}`
+}
 
 // ---------- compose ----------
 function Compose() {
   const { draft, setDraft, makePlan, startCall, notify, phoneState } = useCallStore()
   const [mode, setMode] = useState('agent')
   const [to, setTo] = useState('')
-  const [goal, setGoal] = useState('')
-  const [brief, setBrief] = useState('')
+  const [text, setText] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
 
@@ -101,18 +108,18 @@ function Compose() {
     if (!draft) return
     setMode(draft.mode || 'agent')
     setTo(draft.to ? formatNumber(draft.to) : '')
-    setGoal(draft.goal || '')
-    setBrief(draft.brief || '')
+    setText(callText(draft))
     setDraft(null)
   }, [draft, setDraft])
 
   const submit = async (e) => {
     e.preventDefault()
     setError('')
-    const body = { mode, to, goal, brief }
+    const note = text.trim()
+    const body = { mode, to, goal: note, brief: note }
     try {
       if (mode === 'agent') {
-        if (!goal.trim()) throw new Error(`Tell ${assistantName()} what the call is for`)
+        if (!note) throw new Error(`Tell ${assistantName()} what this call is for`)
         setBusy('plan')
         await makePlan(body)
       } else {
@@ -150,10 +157,8 @@ function Compose() {
           className="mt-1 w-full rounded-2xl border border-gray-200 bg-gray-50 px-3.5 py-3 text-xl tracking-wide outline-none focus:border-primary tabular-nums" />
       </label>
 
-      <DictationField label="What’s the call for?" optional={mode === 'copilot'} value={goal} onChange={setGoal}
-        placeholder="Move my cleaning to a weekday morning next week" maxLength={2000} />
-      <DictationField label="Details the AI can use" value={brief} onChange={setBrief} rows={4}
-        placeholder="Talk or type as much as you like: who you are, account info, times that work, what's OK to agree to, what to avoid." />
+      <DictationField label="This call" optional={mode === 'copilot'} value={text} onChange={setText} rows={5}
+        placeholder="Who you’re calling and what should happen. Your name and standing details come from Settings." maxLength={8000} />
 
       <button type="submit" disabled={!!busy || (mode === 'copilot' && phoneState === 'starting')}
         className="w-full flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-white font-semibold py-4 text-base disabled:opacity-60 active:scale-[0.99] transition-transform">
@@ -426,8 +431,7 @@ function Detail() {
         <p className="text-xs text-gray-500">{formatNumber(c.to)} · {c.mode === 'agent' ? `${assistantName()} made the call` : 'You talked'} · {new Date(c.startedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
         <h2 className="text-lg font-semibold text-gray-900 mt-0.5 leading-snug">{c.summary?.headline || c.goal || 'Call'}</h2>
         {err && <p className="mt-2 flex gap-2 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700"><AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />{err}</p>}
-        {c.goal && <Section title="Goal"><p className="text-sm text-gray-700">{c.goal}</p></Section>}
-        {c.brief && <Section title={`Details the AI used (${c.brief.length.toLocaleString()} characters)`}><p className="text-sm text-gray-700 whitespace-pre-wrap max-h-40 overflow-y-auto rounded-xl bg-gray-50 px-3 py-2">{c.brief}</p></Section>}
+        {(c.brief || c.goal) && <Section title="This call"><p className="text-sm text-gray-700 whitespace-pre-wrap max-h-40 overflow-y-auto rounded-xl bg-gray-50 px-3 py-2">{callText(c)}</p></Section>}
         {c.summary?.summary && <Section title="Summary"><p className="text-sm text-gray-700">{c.summary.summary}</p></Section>}
         <div className="flex gap-2 mt-4">
           <button onClick={redial} className="flex-[2] flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-white font-semibold py-3.5"><RotateCcw size={18} />{c.mode === 'agent' && c.plan ? 'Redial, same plan' : 'Redial, same info'}</button>
