@@ -12,7 +12,20 @@
           "package_name": "com.todo.voice"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "1045816829488-bqsa8dfdmbs218cjijealavi1nf2m5cn.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.todo.voice",
+            "certificate_hash": "bfe97658699190051d30aa1d057981db9498c48d"
+          }
+        },
+        {
+          "client_id": "1045816829488-ntelsjmkgkacjhdm219p28nodme5vrun.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyA-K6ZgFq0hwELSS72dZJURDEB7okWuadE"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1045816829488-ntelsjmkgkacjhdm219p28nodme5vrun.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
