@@ -11,7 +11,7 @@
     "cap:sync": "vite build --mode android && npx cap sync android",
     "cap:open": "npx cap open android",
     "android": "npm run cap:sync && npx cap open android",
-    "apk:debug": "npm run cap:sync && cd android && gradlew.bat assembleDebug",
+    "apk:debug": "npm run cap:sync && cd android && .\\gradlew.bat assembleDebug",
     "dev:emulator": "vite --mode emulator --port 5180",
     "emulators": "npx --yes firebase-tools@15.34.2 emulators:start --only auth,firestore --project demo-todo"
   },
