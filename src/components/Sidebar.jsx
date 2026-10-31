@@ -2,11 +2,10 @@ import { useState } from 'react'
 import { useTaskStore } from '../store/useTaskStore'
 import { useCallStore, isBadStatus } from '../store/useCallStore'
 import { useSyncStore } from '../lib/cloudSync'
-import { SMART_VIEWS, openCount } from '../lib/views'
+import { SMART_VIEWS, LIST_COLORS, openCount } from '../lib/views'
 import { CalendarDays, CalendarClock, Inbox, Layers, Phone, Plus, Settings, CheckCircle2 } from 'lucide-react'
 
 const VIEW_ICONS = { today: CalendarDays, scheduled: CalendarClock, all: Layers }
-const LIST_COLORS = ['#2563EB', '#E5484D', '#12A594', '#F59E0B', '#8E4EC6', '#E54D9E', '#0090FF', '#71717A']
 
 /** Desktop sidebar. */
 export default function Sidebar({ onOpenSettings }) {

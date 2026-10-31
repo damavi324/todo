@@ -160,13 +160,16 @@ export default function Settings({ onClose }) {
 
   const handleImport = () => runImport(setSyncMsg)
 
+  // The Calendar sign-in lapses after about an hour on the web, but sync stays signed in, so either counts.
+  const syncSignedIn = isCloudConfigured() && !['off', 'signed-out'].includes(sync.status)
+  const signedIn = gcalSignedIn || syncSignedIn
   const initial = (accountEmail || sync.email || '?').trim().charAt(0).toUpperCase()
 
   return (
     <Sheet title="Settings" onClose={onClose}>
       <div className="px-4 md:px-6 py-5 space-y-7">
         <Section title="Profile">
-          {!gcalSignedIn ? (
+          {!signedIn ? (
             <div className="p-4 space-y-3">
               <p className="text-sm text-ink-2">
                 Sign in with Google to keep your tasks the same on your phone and the web, and to connect Google Calendar.
@@ -380,6 +383,14 @@ export default function Settings({ onClose }) {
                 />
               </Row>
             </>
+          ) : signedIn ? (
+            <div className="px-4 py-3.5 space-y-2">
+              <p className="text-sm text-ink-3">Google Calendar isn&apos;t connected on this device (its sign-in expires after a while).</p>
+              {authError && <Note tone="danger" className="whitespace-pre-line break-words select-text">{authError}</Note>}
+              <Button size="sm" onClick={handleSignIn} disabled={busy || !authConfigured}>
+                <LogIn size={14} />Connect Google Calendar
+              </Button>
+            </div>
           ) : (
             <p className="text-sm text-ink-3 px-4 py-3.5">Sign in above to connect Google Calendar.</p>
           )}

@@ -111,6 +111,10 @@ export const useTaskStore = create(
         lists: [...s.lists, { id: crypto.randomUUID(), name, color, createdAt: new Date().toISOString() }],
       })),
 
+      updateList: (id, changes) => set((s) => ({
+        lists: s.lists.map((l) => (l.id === id ? { ...l, ...changes } : l)),
+      })),
+
       deleteList: (id) => set((s) => ({
         lists: s.lists.filter((l) => l.id !== id),
         tasks: s.tasks.filter((t) => t.listId !== id),

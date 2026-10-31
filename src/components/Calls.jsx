@@ -133,7 +133,9 @@ function Compose() {
     e.preventDefault()
     setError('')
     const note = text.trim()
-    const body = { mode, to, goal: note, brief: note }
+    // A contact's name typed in full (without tapping the suggestion) still means their number.
+    const named = /[a-z]/i.test(to) && (contacts.find((c) => c.name.toLowerCase() === query) || (matches.length === 1 && matches[0]))
+    const body = { mode, to: named ? named.phone : to, goal: note, brief: note }
     try {
       if (mode === 'agent') {
         if (!note) throw new Error(`Tell ${assistantName()} what this call is for`)
@@ -374,6 +376,15 @@ function ActiveCall() {
               <ControlButton icon={PhoneOff} label="End" danger onClick={s.hangup} />
             </div>
           )
+        )}
+        {/* The notes usually replace this screen a few seconds after hang-up. If they never come
+            (server asleep, connection lost), don't leave the finished call stuck here. */}
+        {ended && (
+          <div className="flex items-center gap-3 mt-5">
+            <Loader2 size={15} className="animate-spin text-ink-3" />
+            <span className="flex-1 text-sm text-ink-3">Writing up the call…</span>
+            <Button variant="primary" size="sm" onClick={s.newCall}>Done</Button>
+          </div>
         )}
         {keypad && !agentMode && !ended && (
           <div className="grid grid-cols-3 gap-2 mt-3">

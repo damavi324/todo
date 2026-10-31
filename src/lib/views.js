@@ -52,7 +52,9 @@ export function groupView(viewId, tasks) {
     add('overdue', 'Overdue', open.filter(overdue), 'danger')
     add('today', 'Today', open.filter((t) => due(t) && due(t) >= today && due(t) < tomorrow))
     add('next', 'Next 7 days', open.filter((t) => due(t) && due(t) >= tomorrow && due(t) < weekEnd))
-    return { groups, done: done.filter((t) => due(t) && due(t) >= today && due(t) < tomorrow) }
+    // Today's items that are done, plus anything finished today (an overdue task ticked off stays visible).
+    const finishedToday = (t) => t.completedAt && new Date(t.completedAt) >= today
+    return { groups, done: done.filter((t) => (due(t) && due(t) >= today && due(t) < tomorrow) || finishedToday(t)) }
   }
 
   if (viewId === 'scheduled') {
@@ -85,4 +87,6 @@ export function openCount(viewId, tasks) {
   return todo.filter((t) => t.listId === viewId).length
 }
 
-export const PRIORITY_COLOR = { high: '#E5484D', medium: '#F59E0B', low: '#3B82F6' }
+export const LIST_COLORS = ['#2563EB', '#E5484D', '#12A594', '#F59E0B', '#8E4EC6', '#E54D9E', '#0090FF', '#71717A']
+
+export const PRIORITY_COLOR ={ high: '#E5484D', medium: '#F59E0B', low: '#3B82F6' }

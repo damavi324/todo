@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { ChevronRight, Loader2, Mic, Plus, Settings, CornerDownLeft } from 'lucide-react'
+import { ChevronRight, Loader2, Mic, Pencil, Plus, Settings, CornerDownLeft } from 'lucide-react'
 import { useTaskStore } from '../store/useTaskStore'
 import { groupView, openCount, viewName } from '../lib/views'
 import { parseSpokenTask } from '../lib/voiceTask'
 import { saveTask } from '../lib/saveTask'
 import { formatDue, toLocalYMD } from '../lib/dates'
 import TaskItem from './TaskItem'
+import ListEditor from './ListEditor'
 import { Button, IconButton } from './ui'
 
 const EMPTY = {
@@ -17,8 +18,10 @@ const EMPTY = {
 export default function TaskList({ onOpenTask, onNewTask, onVoice, onOpenSettings }) {
   const { selectedList, lists, tasks } = useTaskStore()
   const [showDone, setShowDone] = useState(false)
+  const [editingList, setEditingList] = useState(false)
   const { groups, done } = groupView(selectedList, tasks)
   const smartView = ['today', 'scheduled', 'all'].includes(selectedList)
+  const list = !smartView && lists.find((l) => l.id === selectedList)
   const remaining = openCount(selectedList, tasks)
   const title = viewName(selectedList, lists)
   const subtitle = selectedList === 'today'
@@ -30,7 +33,14 @@ export default function TaskList({ onOpenTask, onNewTask, onVoice, onOpenSetting
       <header className="safe-top flex-shrink-0">
         <div className="max-w-3xl mx-auto w-full px-5 md:px-10 pt-6 md:pt-10 pb-4 flex items-end gap-3">
           <div className="flex-1 min-w-0">
-            <h1 className="text-[28px] md:text-[30px] leading-tight font-semibold tracking-tight text-ink truncate">{title}</h1>
+            <div className="flex items-center gap-1 min-w-0">
+              <h1 className="text-[28px] md:text-[30px] leading-tight font-semibold tracking-tight text-ink truncate">{title}</h1>
+              {list && (
+                <IconButton label="Edit list" onClick={() => setEditingList(true)} className="flex-shrink-0 mt-1">
+                  <Pencil size={16} />
+                </IconButton>
+              )}
+            </div>
             <p className="text-sm text-ink-3 mt-1">
               {subtitle}
               {selectedList === 'today' && remaining > 0 && <span> · {remaining} open</span>}
@@ -92,13 +102,14 @@ export default function TaskList({ onOpenTask, onNewTask, onVoice, onOpenSetting
           )}
         </div>
       </div>
+      {editingList && list && <ListEditor key={list.id} list={list} onClose={() => setEditingList(false)} />}
     </div>
   )
 }
 
 /**
  * One line to add a task in plain words: "Call mom tomorrow at 5pm". The date and time are read out of
- * the text. Added in Today, a task without a date is due today; added in a list, it goes in that list.
+ * the text. Added in Today or Upcoming, a task without a date is due today; added in a list, it goes in that list.
  */
 function QuickAdd({ viewId }) {
   const lists = useTaskStore((s) => s.lists)
@@ -114,7 +125,8 @@ function QuickAdd({ viewId }) {
       const parsed = await parseSpokenTask(words)
       delete parsed.parseWarning
       const listId = lists.some((l) => l.id === viewId) ? viewId : parsed.listId || 'inbox'
-      if (!parsed.dueDate && viewId === 'today') parsed.dueDate = toLocalYMD(new Date())
+      // Today and Upcoming only show dated items, so an undated one added there would vanish.
+      if (!parsed.dueDate && (viewId === 'today' || viewId === 'scheduled')) parsed.dueDate = toLocalYMD(new Date())
       const task = await saveTask({ notes: '', priority: 'none', dueTime: '', ...parsed, listId })
       setText('')
       const due = formatDue(task.dueDate, task.dueTime)
