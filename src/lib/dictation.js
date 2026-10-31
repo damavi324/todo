@@ -101,3 +101,50 @@ export async function startDictation({ onText, onError } = {}) {
     },
   }
 }
+
+/**
+ * Hands-free listening: like startDictation, but it stops by itself once you pause after speaking
+ * (or if you say nothing at all). `done` resolves with everything heard.
+ */
+export async function listenUntilPause({ onText, pauseMs = 2200, noSpeechMs = 10000, maxMs = 90000 } = {}) {
+  let rec = null
+  let quiet = null
+  let cap = null
+  let finished = false
+  let settle
+  const done = new Promise((resolve, reject) => { settle = { resolve, reject } })
+  const clear = () => { clearTimeout(quiet); clearTimeout(cap) }
+  const stop = async () => {
+    if (finished || !rec) return
+    finished = true
+    clear()
+    try { settle.resolve(await rec.stop()) } catch (e) { settle.reject(e) }
+  }
+  rec = await startDictation({
+    onText: (text, info) => {
+      onText?.(text, info)
+      clearTimeout(quiet)
+      quiet = setTimeout(stop, pauseMs)
+    },
+    onError: (e) => {
+      if (finished) return
+      finished = true
+      clear()
+      rec?.cancel()
+      settle.reject(e)
+    },
+  })
+  quiet = setTimeout(stop, noSpeechMs)
+  cap = setTimeout(stop, maxMs)
+  return {
+    done,
+    stop,
+    cancel() {
+      if (finished) return
+      finished = true
+      clear()
+      rec.cancel()
+      settle.resolve('')
+    },
+  }
+}

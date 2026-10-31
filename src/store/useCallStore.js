@@ -5,6 +5,7 @@ import { cp, socketUrl, isCallPilotReady, assistantName, wakeServer, callerConte
 import { archiveCall, archivedCall, mergeHistory, hasFinal, archivedList } from '../lib/callArchive'
 import CallSession from '../plugins/CallSession'
 import { contactFor } from '../lib/callFollowUps'
+import { say } from '../lib/notifications'
 
 const BAD = new Set(['failed', 'busy', 'no-answer', 'canceled'])
 const LIVE_TEXT = { starting: 'Starting', dialing: 'Dialing', queued: 'Dialing', initiated: 'Dialing', ringing: 'Ringing', live: 'Live', ended: 'Call ended', busy: 'Line busy', 'no-answer': 'No answer', failed: 'Call failed', canceled: 'Canceled' }
@@ -55,6 +56,7 @@ const initial = {
   notice: null,
   phoneState: 'off', // off | starting | ready | error
   phoneError: '',
+  handsFree: false, // started by voice: the plan calls on its own, questions and results are read aloud
 }
 
 export const useCallStore = create((set, get) => ({
@@ -161,6 +163,7 @@ export const useCallStore = create((set, get) => ({
       case 'question':
         set({ question: ev.question })
         CallSession.alert({ title: `${assistantName()} needs your answer`, text: ev.question.question }).catch(() => {})
+        if (get().handsFree) say(`${assistantName()} asks: ${ev.question.question}`)
         if (navigator.vibrate) navigator.vibrate([150, 90, 150])
         break
       case 'question_closed':
@@ -172,6 +175,7 @@ export const useCallStore = create((set, get) => ({
         break
       case 'summary':
         set({ summary: ev.summary, view: 'summary' })
+        if (get().handsFree) say(['The call is over.', ev.summary?.headline, ev.summary?.summary].filter(Boolean).join(' '))
         get().saveCallLocally(s.id)
         get().refreshHistorySoon()
         break
@@ -251,7 +255,7 @@ export const useCallStore = create((set, get) => ({
 
   // ---------- starting and controlling calls ----------
   setDraft(draft) {
-    set({ draft, view: 'compose', draftVersion: get().draftVersion + 1 })
+    set({ draft, view: 'compose', draftVersion: get().draftVersion + 1, handsFree: false })
   },
 
   async ensureAwake() {
@@ -358,7 +362,7 @@ export const useCallStore = create((set, get) => ({
   },
 
   newCall() {
-    set({ view: 'compose', session: null, status: null, summary: null, pending: null, detail: null })
+    set({ view: 'compose', session: null, status: null, summary: null, pending: null, detail: null, handsFree: false })
   },
 
   // ---------- history, details, logs ----------

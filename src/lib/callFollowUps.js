@@ -2,14 +2,17 @@ import { useTaskStore } from '../store/useTaskStore'
 import { saveTask } from './saveTask'
 import { formatNumber, assistantName } from './callpilot'
 import { toLocalYMD, toLocalHM, addDays } from './dates'
+import { phoneContacts } from './phoneContacts'
 
 const digits = (phone) => String(phone || '').replace(/\D/g, '').slice(-10)
 
-/** The saved contact for a phone number, matched on its last 10 digits. */
+/** The saved contact (or, failing that, the phone contact) for a phone number, matched on its last 10 digits. */
 export function contactFor(phone) {
   const d = digits(phone)
   if (d.length < 7) return null
-  return useTaskStore.getState().contacts.find((c) => digits(c.phone) === d) || null
+  return useTaskStore.getState().contacts.find((c) => digits(c.phone) === d)
+    || phoneContacts().find((c) => digits(c.phone) === d)
+    || null
 }
 
 /** Who a call was with: the contact's name, or the formatted number. */

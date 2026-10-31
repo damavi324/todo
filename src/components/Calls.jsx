@@ -7,7 +7,10 @@ import {
 import { useCallStore, statusText, isBadStatus } from '../store/useCallStore'
 import { useTaskStore } from '../store/useTaskStore'
 import { formatNumber, assistantName, ownerName, isCallPilotReady } from '../lib/callpilot'
-import { startDictation } from '../lib/dictation'
+import { startDictation, listenUntilPause } from '../lib/dictation'
+import { parseSpokenCall } from '../lib/spokenCall'
+import { say } from '../lib/notifications'
+import { loadPhoneContacts, phoneContacts, mergeContacts, pickByName } from '../lib/phoneContacts'
 import { formatDue } from '../lib/dates'
 import { addAppointment, addFollowUp, callWith, contactFor, scheduleCallback, callbackTime } from '../lib/callFollowUps'
 import { Button, IconButton, Note, Segmented, Sheet, fieldClass } from './ui'
@@ -93,6 +96,31 @@ function DictationField({ label, value, onChange, placeholder, rows = 2, hint, m
   )
 }
 const join = (a, b) => [a, b].filter(Boolean).join(a && b ? ' ' : '')
+
+// How long a hands-free call waits before dialing, so there's time to cancel.
+const HANDS_FREE_SECONDS = 8
+
+/** Counts down, then runs onDone. Cancel stops it. */
+function Countdown({ label, seconds = HANDS_FREE_SECONDS, onDone, onCancel }) {
+  const [left, setLeft] = useState(seconds)
+  const done = useRef(onDone)
+  useEffect(() => { done.current = onDone })
+  useEffect(() => {
+    if (left <= 0) {
+      done.current()
+      return
+    }
+    const t = setTimeout(() => setLeft((n) => n - 1), 1000)
+    return () => clearTimeout(t)
+  }, [left])
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-accent/10 px-4 py-3" role="status">
+      <Loader2 size={16} className="animate-spin text-accent flex-shrink-0" />
+      <span className="flex-1 text-sm font-medium text-accent">{label} in {Math.max(0, left)}s</span>
+      <Button size="sm" onClick={onCancel}>Cancel</Button>
+    </div>
+  )
+}
 function callText(draft) {
   const goal = (draft?.goal || '').trim()
   const brief = (draft?.brief || '').trim()
@@ -123,24 +151,44 @@ function Compose() {
   // Used up: the next time the form opens without a new draft, it starts empty.
   useEffect(() => { if (draft) useCallStore.setState({ draft: null }) }, [draft])
 
+  // Hands-free: the listener while it runs, what it has heard so far, and an "I'll talk" call about to dial.
+  const [listening, setListening] = useState(null)
+  const [heard, setHeard] = useState('')
+  const [autoCall, setAutoCall] = useState(null)
+  useEffect(() => () => listening?.cancel(), [listening])
+
+  // The phone's own contacts (Android, once allowed) join the ones saved here.
+  const [phoneList, setPhoneList] = useState(phoneContacts)
+  useEffect(() => { loadPhoneContacts().then(setPhoneList) }, [])
+  const everyone = mergeContacts(contacts, phoneList)
+
   const contact = contactFor(to)
   const query = to.trim().toLowerCase()
+  const typedDigits = query.replace(/\D/g, '')
+  // Search by name, or by part of the number; with an empty field, show your saved contacts first.
   const matches = /[a-z]/i.test(query)
-    ? contacts.filter((c) => c.name.toLowerCase().includes(query)).slice(0, 5)
-    : picking && !query ? contacts.slice(0, 6) : []
+    ? everyone.filter((c) => c.name.toLowerCase().includes(query)).slice(0, 8)
+    : typedDigits.length >= 3 && !contact
+      ? everyone.filter((c) => c.phone.replace(/\D/g, '').includes(typedDigits)).slice(0, 5)
+      : picking && !query ? everyone.slice(0, 8) : []
 
-  const submit = async (e) => {
-    e.preventDefault()
+  // A contact's name typed in full (without tapping the suggestion) still means their number.
+  const resolveTo = (value) => {
+    if (!/[a-z]/i.test(value)) return value
+    return pickByName(everyone, value)?.phone || value
+  }
+
+  const go = async (fields, { handsFree = false } = {}) => {
     setError('')
-    const note = text.trim()
-    // A contact's name typed in full (without tapping the suggestion) still means their number.
-    const named = /[a-z]/i.test(to) && (contacts.find((c) => c.name.toLowerCase() === query) || (matches.length === 1 && matches[0]))
-    const body = { mode, to: named ? named.phone : to, goal: note, brief: note }
+    const note = fields.text.trim()
+    const body = { mode: fields.mode, to: resolveTo(fields.to), goal: note, brief: note }
+    useCallStore.setState({ handsFree })
     try {
-      if (mode === 'agent') {
+      if (fields.mode === 'agent') {
         if (!note) throw new Error(`Tell ${assistantName()} what this call is for`)
         setBusy('plan')
-        await makePlan(body)
+        const plan = await makePlan(body)
+        if (handsFree) say(`${plan.objective || 'The plan is ready'}. Calling in ${HANDS_FREE_SECONDS} seconds. Tap cancel to stop.`)
       } else {
         setBusy('call')
         await startCall(body)
@@ -148,14 +196,84 @@ function Compose() {
     } catch (err) {
       setError(err.message)
       notify(err.message, 'error')
+      if (handsFree) say(`That didn't work. ${err.message}`)
     } finally {
       setBusy('')
+    }
+  }
+
+  const submit = (e) => {
+    e.preventDefault()
+    go({ mode, to, text })
+  }
+
+  /** One tap, then speak: "Call the dentist at 214 555 0100 and move my cleaning to next week." */
+  const speakCall = async () => {
+    if (listening) return listening.stop()
+    setError('')
+    setHeard('')
+    setAutoCall(null)
+    let listener
+    try {
+      listener = await listenUntilPause({ onText: setHeard })
+    } catch (e) {
+      setError(e.message)
+      return
+    }
+    setListening(listener)
+    let said = ''
+    try {
+      said = await listener.done
+    } catch (e) {
+      setError(e.message)
+    }
+    setListening(null)
+    if (!said.trim()) return
+
+    const parsed = parseSpokenCall(said, everyone)
+    const next = {
+      mode: parsed.mode || mode,
+      to: parsed.to ? formatNumber(parsed.to) || parsed.to : to,
+      text: parsed.note || text,
+    }
+    setMode(next.mode)
+    setTo(next.to)
+    setText(next.text)
+    if (!next.to.trim()) return say('I didn’t catch who to call. Say their full name or the number.')
+    if (next.mode === 'agent' && !next.text.trim()) return say('What should the call be about?')
+    const who = parsed.contact || callWith({ to: resolveTo(next.to) })
+    if (next.mode === 'agent') {
+      say(`Got it. Getting the call to ${who} ready.`)
+      go(next, { handsFree: true })
+    } else {
+      say(`Calling ${who} in ${HANDS_FREE_SECONDS} seconds.`)
+      setAutoCall(next)
     }
   }
 
   return (
     <Card>
       <form onSubmit={submit} className="p-5 space-y-5">
+        <button type="button" onClick={speakCall} disabled={!!busy}
+          className={`w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors disabled:opacity-50 ${listening ? 'bg-danger/10' : 'bg-accent/10 hover:bg-accent/15'}`}>
+          <span className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 ${listening ? 'bg-danger text-white animate-pulse' : 'bg-accent text-accent-ink'}`}>
+            {listening ? <MicOff size={20} /> : <Mic size={20} />}
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[15px] font-medium text-ink">{listening ? 'Listening… pause when you’re done' : 'Speak the call'}</span>
+            <span className="block text-xs text-ink-3 mt-0.5 line-clamp-3">
+              {listening
+                ? heard || 'Who to call, and what it’s about'
+                : 'Hands-free: say who to call (a number or a contact) and what it’s about. It fills this in and dials.'}
+            </span>
+          </span>
+        </button>
+        {autoCall && (
+          <Countdown label={`Calling ${callWith({ to: resolveTo(autoCall.to) })}`}
+            onDone={() => { const fields = autoCall; setAutoCall(null); go(fields, { handsFree: true }) }}
+            onCancel={() => setAutoCall(null)} />
+        )}
+
         <div className="space-y-1.5">
           <Segmented value={mode} onChange={setMode} options={MODES} />
           <p className="text-xs text-ink-3 px-1">
@@ -167,21 +285,24 @@ function Compose() {
 
         <div className="relative">
           <span className="block text-sm font-medium text-ink mb-1.5">Who to call</span>
-          <input type="text" inputMode="tel" autoComplete="off" value={to} required
+          {/* A full keyboard, not the number pad, so you can search contacts by name. */}
+          <input type="text" autoComplete="off" autoCorrect="off" autoCapitalize="words" spellCheck={false} value={to} required
             onChange={(e) => setTo(e.target.value)}
             onFocus={() => setPicking(true)}
             onBlur={() => setTimeout(() => setPicking(false), 150)}
-            placeholder={contacts.length ? 'Name or number' : '(214) 555-0123'}
+            placeholder={everyone.length ? 'Search contacts, or type a number' : '(214) 555-0123'}
             className={`${fieldClass} w-full h-11 text-base tabular-nums`} />
           {contact && <p className="text-xs text-ink-3 mt-1.5 px-1">{contact.name}{contact.notes ? ' · their notes are included' : ''}</p>}
           {matches.length > 0 && (
-            <div className="absolute z-10 inset-x-0 mt-1 bg-surface rounded-lg shadow-pop py-1">
+            <div className="absolute z-10 inset-x-0 mt-1 bg-surface rounded-lg shadow-pop py-1 max-h-80 overflow-y-auto">
               {matches.map((c) => (
                 <button key={c.id} type="button" onMouseDown={(e) => e.preventDefault()}
                   onClick={() => { setTo(formatNumber(c.phone) || c.phone); setPicking(false) }}
-                  className="w-full flex items-center justify-between gap-3 px-3 h-10 text-left hover:bg-surface-2">
+                  className="w-full flex items-center justify-between gap-3 px-3 h-11 text-left hover:bg-surface-2">
                   <span className="text-sm text-ink truncate">{c.name}</span>
-                  <span className="text-xs text-ink-3 tabular-nums">{formatNumber(c.phone) || c.phone}</span>
+                  <span className="text-xs text-ink-3 tabular-nums flex-shrink-0">
+                    {c.label && <span className="mr-1.5">{c.label}</span>}{formatNumber(c.phone) || c.phone}
+                  </span>
                 </button>
               ))}
             </div>
@@ -212,6 +333,8 @@ function Compose() {
 function PlanView() {
   const { pending, startCall, setDraft, notify } = useCallStore()
   const [busy, setBusy] = useState(false)
+  // Asked for by voice: call on its own after a short countdown, unless you cancel.
+  const [auto, setAuto] = useState(() => useCallStore.getState().handsFree)
   if (!pending) return null
   const p = pending.plan
   const extras = [
@@ -220,11 +343,20 @@ function PlanView() {
     p.confirm_before_hanging_up?.length && `Reads back before hanging up: ${p.confirm_before_hanging_up.join(', ')}`,
   ].filter(Boolean)
   const call = async () => {
+    setAuto(false)
     setBusy(true)
-    try { await startCall(pending) } catch (err) { notify(err.message, 'error') } finally { setBusy(false) }
+    try { await startCall(pending) } catch (err) {
+      notify(err.message, 'error')
+      if (useCallStore.getState().handsFree) say(`The call didn't start. ${err.message}`)
+    } finally { setBusy(false) }
   }
   return (
     <Card className="p-5">
+      {auto && !busy && (
+        <div className="mb-4">
+          <Countdown label={`Calling ${callWith(pending)}`} onDone={call} onCancel={() => setAuto(false)} />
+        </div>
+      )}
       <p className="text-xs text-ink-3">Call plan · {callWith(pending)}</p>
       <h2 className="text-lg font-semibold text-ink mt-1 leading-snug">{p.objective || 'Call plan'}</h2>
       <div className="mt-4 rounded-lg bg-surface-2 px-4 py-3">
@@ -304,7 +436,22 @@ function Transcript({ lines, partials = NO_PARTIALS, live = false }) {
 
 function QuestionCard({ question, answer }) {
   const [text, setText] = useState('')
+  const [listening, setListening] = useState(null)
+  useEffect(() => () => listening?.cancel(), [listening])
   const send = (v) => { answer(v); setText('') }
+  // Say the answer: it's sent once you pause.
+  const speak = async () => {
+    if (listening) return listening.stop()
+    try {
+      const listener = await listenUntilPause({ onText: setText, noSpeechMs: 12000 })
+      setListening(listener)
+      const said = await listener.done
+      setListening(null)
+      if (said.trim()) send(said.trim())
+    } catch {
+      setListening(null)
+    }
+  }
   return (
     <form onSubmit={(e) => { e.preventDefault(); send(text) }} className="rounded-xl border-2 border-accent bg-surface shadow-pop p-4 space-y-3">
       <p className="flex items-center gap-2 text-xs font-semibold text-accent">
@@ -314,6 +461,10 @@ function QuestionCard({ question, answer }) {
       <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Type your answer"
         className={`${fieldClass} w-full h-10`} />
       <div className="flex gap-2">
+        <Button size="sm" onClick={speak} aria-pressed={!!listening}
+          className={listening ? '!bg-danger !text-white animate-pulse' : ''}>
+          {listening ? <MicOff size={14} /> : <Mic size={14} />}{listening ? 'Listening' : 'Speak'}
+        </Button>
         <Button type="submit" variant="primary" size="sm" className="flex-1" disabled={!text.trim()}>Send</Button>
         <Button size="sm" onClick={() => send('Yes, that works.')}>Yes</Button>
         <Button size="sm" onClick={() => send('No. Say I’ll follow up.')}>No</Button>

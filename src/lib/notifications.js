@@ -84,6 +84,16 @@ export async function announce(title) {
   })
 }
 
+/** Say something in the reminder voice, e.g. hands-free calling telling you what it's doing. */
+export function say(text) {
+  const { settings } = useTaskStore.getState()
+  return VoiceReminder.announce({
+    text,
+    voice: settings.voiceName || '',
+    pitch: Number(settings.voicePitch) || 1,
+  }).catch(() => {})
+}
+
 /** Apply "Mark Done" taps made on notifications while the app was closed or in the background. */
 export async function applyNotificationCompletions() {
   if (!isNative()) return
