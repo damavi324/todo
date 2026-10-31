@@ -26,5 +26,17 @@
         "*.test.js"
       ]
     }
-  ]
+  ],
+  "auth": {
+    "providers": {
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "ToDo",
+        "supportEmail": "damavi324@gmail.com",
+        "authorizedRedirectUris": [
+          "https://todo-88bb6.firebaseapp.com/__/auth/handler",
+          "http://localhost"
+        ]
+      }
+    }
+  }
 }
