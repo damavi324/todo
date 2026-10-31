@@ -219,7 +219,7 @@ export default function Settings({ onClose }) {
                 </p>
               )}
               {authError && (
-                <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2.5">{authError}</p>
+                <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2.5 whitespace-pre-line break-words select-text">{authError}</p>
               )}
               <button
                 onClick={handleSignIn}
