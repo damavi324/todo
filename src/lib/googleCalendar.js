@@ -1,6 +1,12 @@
 import { SocialLogin } from '@capgo/capacitor-social-login'
 import { Capacitor } from '@capacitor/core'
-import { CALENDAR_SCOPES, GOOGLE_WEB_CLIENT_ID, isGoogleAuthConfigured } from '../config/googleAuth'
+import {
+  CALENDAR_SCOPES,
+  GOOGLE_PROJECT_NUMBER,
+  GOOGLE_WEB_CLIENT_ID,
+  isGoogleAuthConfigured,
+  webClientMatchesAppProject,
+} from '../config/googleAuth'
 import { useTaskStore } from '../store/useTaskStore'
 import DeviceCalendar from '../plugins/DeviceCalendar'
 import { cloudSignIn, cloudSignOut } from './cloudSync'
@@ -60,7 +66,81 @@ export async function initGoogleAuth() {
   initialized = true
 }
 
+const APP_PACKAGE = 'com.todo.voice'
+
+// Google's sign-in errors are raw codes like "[28404] Failed to retrieve an ID token".
+// Turn them into what went wrong and what to do about it, keeping the original for reference.
+function describeSignInError(error) {
+  const raw = String(error?.message || error || 'Unknown error')
+  const text = raw.toLowerCase()
+  const clientId = GOOGLE_WEB_CLIENT_ID
+    ? `${GOOGLE_WEB_CLIENT_ID.slice(0, 12)}…${GOOGLE_WEB_CLIENT_ID.slice(-28)}`
+    : '(not set)'
+
+  if (/28404|28444|developer console|not configured for this installed build|failed to retrieve an id token|\b10:/.test(text)) {
+    return [
+      "Google didn't recognize this copy of the app, so it refused to sign you in.",
+      'This is a Google Cloud setup problem, not your account. To fix it:',
+      ...(webClientMatchesAppProject() ? [] : [
+        `• Your Web client ID is from a different Google Cloud project than the app (${GOOGLE_PROJECT_NUMBER}, todo-88bb6). Use the todo-88bb6 Web client, or remove VITE_GOOGLE_WEB_CLIENT_ID from .env.local, and rebuild.`,
+      ]),
+      `• VITE_GOOGLE_WEB_CLIENT_ID must be the "Web application" client ID, not the Android one (now: ${clientId}).`,
+      `• The same Cloud project needs an Android OAuth client for package ${APP_PACKAGE} with the SHA-1 of the key that built this APK (debug, release and Play Store keys all differ).`,
+      '• If the OAuth consent screen is in Testing, add your Google account as a test user.',
+      '• Rebuild the app after changing .env.local. Google changes can take a few minutes to apply.',
+      'Tip: run "adb logcat -s GoogleProvider" while signing in to see the exact SHA-1 this build uses.',
+    ].join('\n')
+  }
+  if (/no credentials|no matching credential|no google accounts|nocredential/.test(text)) {
+    return [
+      "Your phone didn't offer any Google account to sign in with.",
+      '• Add a Google account in phone Settings → Passwords & accounts.',
+      '• Make sure "Sign in with Google" prompts are on in your Google Account settings.',
+    ].join('\n')
+  }
+  if (/reauth/.test(text)) {
+    return [
+      'Google asked to re-check your account and it failed.',
+      '• If the OAuth consent screen is in Testing, add this account as a test user.',
+      '• Supervised (Family Link) or work accounts may be blocked from this app.',
+    ].join('\n')
+  }
+  if (error instanceof TypeError || /network|timeout|unreachable|\b7:/.test(text)) {
+    return "Couldn't reach Google. Check your internet connection and try again."
+  }
+  if (/calendar access token/.test(text)) {
+    return [
+      'You signed in, but Google gave no Calendar permission.',
+      '• Try again and allow Calendar access when Google asks.',
+      '• Make sure the Google Calendar API is enabled in the Cloud project.',
+    ].join('\n')
+  }
+  return 'Google Sign-In failed. Try again, and if it keeps failing check the Google Cloud OAuth setup.'
+}
+
+class SignInError extends Error {
+  constructor(cause) {
+    const raw = String(cause?.message || cause || 'Unknown error').replace(/^Google Sign-In failed:\s*/i, '')
+    super(`${describeSignInError(cause)}\n\nDetails: ${raw}`)
+    this.code = cause?.code
+    this.detail = raw
+  }
+}
+
+function isUserCancelled(error) {
+  return error?.code === 'USER_CANCELLED' || /cancel/i.test(String(error?.message || ''))
+}
+
 export async function signIn() {
+  try {
+    return await signInWithGoogle()
+  } catch (e) {
+    if (isUserCancelled(e)) throw Object.assign(e instanceof Error ? e : new Error(String(e)), { code: 'USER_CANCELLED' })
+    throw new SignInError(e)
+  }
+}
+
+async function signInWithGoogle() {
   await initGoogleAuth()
 
   const { result } = await SocialLogin.login({
@@ -74,7 +154,7 @@ export async function signIn() {
 
   const accessToken = extractAccessToken(result?.accessToken)
   if (!accessToken) {
-    throw new Error('Google Sign-In did not return a Calendar access token. Check OAuth scopes and SHA-1 setup.')
+    throw new Error('Google Sign-In did not return a Calendar access token.')
   }
 
   const email = result?.profile?.email || ''

@@ -11,6 +11,7 @@ import {
   importUpcomingEvents,
   calendarActive,
 } from '../lib/googleCalendar'
+import { GOOGLE_PROJECT_NUMBER, webClientMatchesAppProject } from '../config/googleAuth'
 import { requestVoiceReminderPermissions, syncReminders, spokenText, announce } from '../lib/notifications'
 import { voiceOptions, PITCHES } from '../lib/voices'
 import VoiceReminder from '../plugins/VoiceReminder'
@@ -178,7 +179,14 @@ export default function Settings({ onClose }) {
                   (package <code className="font-mono">com.todo.voice</code> + SHA-1).
                 </Note>
               )}
-              {authError && <Note tone="danger">{authError}</Note>}
+              {authConfigured && !webClientMatchesAppProject() && (
+                <Note tone="warn">
+                  <code className="font-mono">VITE_GOOGLE_WEB_CLIENT_ID</code> is from a different Google Cloud project than
+                  this app ({GOOGLE_PROJECT_NUMBER}, todo-88bb6), so Google will likely refuse sign-in. Use the todo-88bb6 Web
+                  client, or remove it from <code className="font-mono">.env.local</code>, and rebuild.
+                </Note>
+              )}
+              {authError && <Note tone="danger" className="whitespace-pre-line break-words select-text">{authError}</Note>}
               <Button variant="primary" onClick={handleSignIn} disabled={!authConfigured || busy} className="w-full">
                 <LogIn size={16} />
                 {busy ? 'Signing in…' : 'Sign in with Google'}
@@ -205,7 +213,7 @@ export default function Settings({ onClose }) {
               </div>
               {isCloudConfigured() && sync.status === 'signed-out' && (
                 <div className="px-4 pb-4 space-y-2">
-                  {authError && <Note tone="danger">{authError}</Note>}
+                  {authError && <Note tone="danger" className="whitespace-pre-line break-words select-text">{authError}</Note>}
                   <Button variant="primary" size="sm" onClick={handleSignIn} disabled={busy} className="w-full">
                     Turn on sync
                   </Button>
