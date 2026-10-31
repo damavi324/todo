@@ -73,7 +73,7 @@ function agentPrompt(s) {
     '',
     s.about ? `ABOUT ${owner.toUpperCase()} (true on every call; use these facts, and do not ask the other person for them):\n${s.about}\n` : '',
     `THIS CALL: ${s.goal || 'See context.'}`,
-    s.plan ? planToPrompt(s.plan) : '',
+    s.plan ? planToPrompt(s.plan, owner) : '',
     `THIS CALL, IN ${owner.toUpperCase()}'S WORDS (reference only; the plan above takes priority): ${(s.brief || s.goal || '(none)').slice(0, s.plan ? 5000 : 9000)}`,
     '',
     'HOW TO TALK (you are on the phone; sound like a relaxed, friendly person, not a script)',
@@ -179,8 +179,10 @@ export function handleAgentStream(twilioWs) {
     for (const f of frames(buf)) sendTwilio({ event: 'media', streamSid, media: { payload: f.toString('base64') } });
   };
 
+  let hungUp = false;
   const doHangup = async (why) => {
-    if (!session?.callSid) return;
+    if (!session?.callSid || hungUp) return;
+    hungUp = true;
     try {
       await hangupCall(session.callSid);
       log('[agent] hung up:', why);

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { GoogleAuthProvider, onAuthStateChanged, signInWithCredential, signOut } from 'firebase/auth'
-import { collection, deleteDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore'
+import { collection, deleteDoc, deleteField, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore'
 import { cloud, isCloudConfigured } from './firebase'
 import { useTaskStore, DEFAULT_LISTS, DEFAULT_SETTINGS, mergeProfile } from '../store/useTaskStore'
 import { Capacitor } from '@capacitor/core'
@@ -152,7 +152,12 @@ function mirrorCollection(db, uid, name, { select, order, mayUpload, starter = [
 function mirrorProfile(db, uid, { mayUpload }) {
   const ref = doc(db, 'users', uid, 'meta', 'profile')
   const pick = pickShared
-  const upload = (s) => setDoc(ref, plain({ settings: pick(s.settings), dismissedEventIds: s.dismissedEventIds }), { merge: true })
+  // callerName is the old separate call name. Left in the cloud copy, it would replace the profile name on
+  // every sync (mergeProfile), so each upload removes it.
+  const upload = (s) => setDoc(ref, {
+    settings: { ...plain(pick(s.settings)), callerName: deleteField() },
+    dismissedEventIds: plain(s.dismissedEventIds || []),
+  }, { merge: true })
   let merged = false
 
   const stopCloud = onSnapshot(ref, { includeMetadataChanges: true }, (snap) => {
@@ -171,6 +176,8 @@ function mirrorProfile(db, uid, { mayUpload }) {
       settings: { ...s.settings, ...pick(mergeProfile(data.settings || {})) },
       dismissedEventIds: data.dismissedEventIds || s.dismissedEventIds,
     })
+    // Moved over once; now drop it so later name changes stick.
+    if (data.settings?.callerName !== undefined && mayUpload) upload(useTaskStore.getState()).catch(reportError)
   }, reportError)
 
   const stopLocal = useTaskStore.subscribe((state, prev) => {

@@ -434,6 +434,35 @@ try {
   pass('Join call: agent tells them it is connecting you, then bridges the call to your app');
   tw2.close();
 
+  // ---- the name from the app's profile is used everywhere, not the server's OWNER_NAME ----
+  claudeRequests.length = 0;
+  r = await req('/api/plan', { method: 'POST', body: { to: '2145550199', goal: 'Reschedule cleaning', brief: 'Tue is best', owner: 'Sam Rivera' } });
+  assert.equal(r.status, 200);
+  const namedPlanReq = claudeRequests.find((c) => /call planner/.test(c.json.system));
+  assert.match(namedPlanReq.json.system, /call planner for Sam Rivera's personal assistant/);
+  assert.doesNotMatch(namedPlanReq.json.system, /\bMk\b/);
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550166', goal: 'Reschedule cleaning', brief: 'Tue is best', plan, owner: 'Sam Rivera' } });
+  const ag3 = r.json.session;
+  const tw3 = new WebSocket(`ws://localhost:${PORTS.app}/streams/agent`);
+  await new Promise((res) => tw3.on('open', res));
+  agentLog.settings = null;
+  tw3.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_3', callSid: ag3.callSid, customParameters: { sessionId: ag3.id } } }));
+  await waitFor(() => agentLog.settings, 'named agent settings');
+  assert.match(agentLog.settings.agent.greeting, /calling on behalf of Sam Rivera\./);
+  assert.match(agentLog.settings.agent.think.prompt, /Check with Sam Rivera \(ask_owner\) before:/);
+  assert.doesNotMatch(agentLog.settings.agent.think.prompt, /Check with Mk\b/);
+  pass('Your profile name reaches the call plan, the greeting and the agent’s instructions');
+  tw3.close();
+
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550155', goal: 'Ask about hours' } });
+  const busyCall = r.json.session;
+  await req(`/twilio/status?sessionId=${busyCall.id}`, { method: 'POST', form: { CallSid: busyCall.callSid, CallStatus: 'busy' } });
+  r = await req(`/api/sessions/${busyCall.id}`);
+  assert.equal(r.json.call.status, 'busy', 'a busy line is not reported as a normal "ended" call');
+  assert.equal(r.json.call.error, 'busy');
+  assert.ok(r.json.call.endedAt);
+  pass('A busy or unanswered call keeps that reason after it closes');
+
   // ---- call records, per-call logs, logs panel ----
   r = await req(`/api/sessions/${ag2.id}`);
   assert.equal(r.status, 200);

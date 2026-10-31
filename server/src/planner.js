@@ -12,7 +12,7 @@ const SCHEMA = `{
   "objective": "one sentence: what success looks like",
   "opening": "1-2 sentences the agent says right after its AI-assistant introduction, stating why it is calling. Natural, spoken, no names of the business unless given.",
   "steps": ["ordered conversation flow, 3-7 short steps"],
-  "facts_to_share": [{"label": "e.g. Name on the account", "value": "e.g. Mk Khanal"}],
+  "facts_to_share": [{"label": "e.g. Name on the account", "value": "the fact itself, copied from the details"}],
   "can_agree_to": ["things the agent may accept without asking, e.g. any weekday slot 8-11am"],
   "ask_owner_before": ["decisions the agent must check with the owner first"],
   "never_share": ["types of info the agent must not say, e.g. Social Security number"],
@@ -23,8 +23,7 @@ const SCHEMA = `{
   "missing_info": ["things the business will probably ask that the details do not answer"]
 }`;
 
-export function plannerSystem() {
-  const owner = config.ownerName;
+export function plannerSystem(owner = config.ownerName) {
   return [
     `You are the call planner for ${owner}'s personal assistant. An AI voice agent named ${config.assistantName} will phone someone on ${owner}'s behalf, and your plan is its briefing.`,
     `Read ${owner}'s standing details and the note for this call. The standing details are true on every call. The note is only for this call. Either may be long, rambling, or dictated by voice with transcription errors; extract what matters and ignore filler.`,
@@ -46,10 +45,10 @@ export async function generatePlan({ to, goal, brief, owner, about }) {
   const prompt = `Phone number being called: ${to}\n\nAbout ${name} (true on every call; do not ask the other person for these):\n${standing || '(none)'}\n\nThis call only:\n${details || '(not given)'}`;
   let text;
   try {
-    text = await complete({ model: config.anthropic.smartModel, system: plannerSystem(), prompt, maxTokens: 1800, timeoutMs: 60000 });
+    text = await complete({ model: config.anthropic.smartModel, system: plannerSystem(name), prompt, maxTokens: 1800, timeoutMs: 60000 });
   } catch (err) {
     // Fall back to the fast model so a slow or unavailable model never blocks the call.
-    text = await complete({ model: config.anthropic.fastModel, system: plannerSystem(), prompt, maxTokens: 1800, timeoutMs: 30000 });
+    text = await complete({ model: config.anthropic.fastModel, system: plannerSystem(name), prompt, maxTokens: 1800, timeoutMs: 30000 });
   }
   const plan = normalizePlan(parseJson(text));
   if (!plan) throw new Error('Could not build a call plan from the details. Try rephrasing the goal.');
@@ -93,9 +92,8 @@ export function normalizePlan(p) {
 }
 
 /** Renders the plan as the briefing section of the voice agent's prompt. */
-export function planToPrompt(plan) {
+export function planToPrompt(plan, owner = config.ownerName) {
   if (!plan) return '';
-  const owner = config.ownerName;
   const list = (title, items) => (items?.length ? `${title}\n${items.map((x) => `- ${x}`).join('\n')}\n` : '');
   return [
     'CALL PLAN (a guide, not a script: follow its intent, adapt to what the other person actually says, and never read it out word for word)',

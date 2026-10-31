@@ -274,6 +274,7 @@ export function answerQuestion(s, qid, answer) {
 }
 
 // ---------- End of call ----------
+const BAD_STATUS = new Set(['failed', 'busy', 'no-answer', 'canceled']);
 export function finalize(s, reason = 'ended') {
   if (s._finalized) return;
   s._finalized = true;
@@ -283,7 +284,13 @@ export function finalize(s, reason = 'ended') {
   s._pendingAnswers.clear();
   // flush partial lines that never got a final
   for (const [speaker, text] of Object.entries(s._partials)) if (text) addLine(s, speaker, text);
-  setStatus(s, 'ended', reason);
+  // A call that never connected keeps its reason (busy, no-answer...) so the app can say what happened.
+  if (BAD_STATUS.has(s.status)) {
+    if (!s.error) s.error = s.status;
+    slog(s, 'info', `Call closed (${reason})`);
+  } else {
+    setStatus(s, 'ended', reason);
+  }
   // give in-flight transcripts a moment to land, then summarize
   setTimeout(() => summarize(s), 1500);
 }

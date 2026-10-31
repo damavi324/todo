@@ -192,7 +192,7 @@ function Compose() {
           placeholder={mode === 'agent'
             ? 'e.g. Move my cleaning to a weekday morning next week. Fine with 8–11am. Don’t agree to any fee.'
             : 'Optional: what you want out of the call, so the suggestions are useful.'}
-          hint={mode === 'agent' ? 'Your name and standing details come from Settings → Calling.' : undefined}
+          hint={mode === 'agent' ? 'Your name and standing details come from Settings → Profile.' : undefined}
         />
 
         {error && <Note tone="danger">{error}</Note>}
@@ -524,12 +524,13 @@ function SaveContact({ phone }) {
 }
 
 function Summary() {
-  const { summary, session, lines, newCall } = useCallStore()
+  const { summary, session, lines, newCall, status } = useCallStore()
   if (!summary || !session) return null
+  const error = isBadStatus(status) ? statusText(status) : ''
   return (
     <div className="space-y-3">
       <Card className="p-5">
-        <CallOutcome call={session} summary={summary} />
+        <CallOutcome call={session} summary={summary} error={error} />
         <div className="flex mt-6">
           <Button variant="primary" onClick={newCall} className="flex-1 h-11">Done</Button>
         </div>
