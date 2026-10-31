@@ -49,7 +49,13 @@ export async function initGoogleAuth() {
   }
   if (initialized) return
   await SocialLogin.initialize({
-    google: { webClientId: GOOGLE_WEB_CLIENT_ID, mode: 'online' },
+    google: {
+      webClientId: GOOGLE_WEB_CLIENT_ID,
+      mode: 'online',
+      // In a browser the sign-in popup returns to the site's address, e.g. http://localhost:5173, which is
+      // what the OAuth client lists under redirect URIs. Google matches it exactly, so no trailing slash.
+      ...(!Capacitor.isNativePlatform() && { redirectUrl: window.location.origin }),
+    },
   })
   initialized = true
 }
