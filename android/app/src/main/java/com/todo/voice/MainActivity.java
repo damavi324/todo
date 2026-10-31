@@ -2,6 +2,7 @@ package com.todo.voice;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.webkit.CookieManager;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginHandle;
@@ -17,6 +18,12 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
         registerPlugin(CallSessionPlugin.class);
         super.onCreate(savedInstanceState);
         VoiceReminderHelper.ensureChannel(this);
+        // Calls loads the CallPilot site inside this app, so its login cookie has to be kept.
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            CookieManager cookies = CookieManager.getInstance();
+            cookies.setAcceptCookie(true);
+            cookies.setAcceptThirdPartyCookies(getBridge().getWebView(), true);
+        }
     }
 
     // During a call, keep the WebView (and its call audio and live updates) running when the

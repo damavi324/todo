@@ -9,9 +9,10 @@ import { useTaskStore } from './store/useTaskStore'
 import { syncReminders, applyNotificationCompletions } from './lib/notifications'
 import { autoImport } from './lib/googleCalendar'
 import VoiceReminder from './plugins/VoiceReminder'
-import Calls, { LogsSheet } from './components/Calls'
+import { LogsSheet } from './components/Calls'
 import VoiceAssistant from './components/VoiceAssistant'
 import { useCallStore } from './store/useCallStore'
+import { normalizeServerUrl, wakeServer } from './lib/callpilot'
 
 // Bring the app in line with what happened while it was closed or in the background.
 async function refresh() {
@@ -35,18 +36,16 @@ export default function App() {
   const notice = useCallStore((s) => s.notice)
   const question = useCallStore((s) => s.question)
 
-  // Keep the live call connection up whenever a calling server is configured.
+  // Calls is the live CallPilot page, which owns the phone line. Wake the server, but
+  // do not open a second line from this app.
   useEffect(() => {
-    const calls = useCallStore.getState()
-    if (callpilotConnected && callpilotUrl) calls.connect()
-    else calls.disconnect()
+    useCallStore.getState().disconnect()
+    if (callpilotConnected && callpilotUrl) wakeServer().catch(() => {})
   }, [callpilotUrl, callpilotConnected])
 
-  // Opening the app (or coming back to it) wakes a sleeping cloud server right away,
-  // so it's usually ready by the time you tap Call or the mic.
   useEffect(() => {
     if (!callpilotConnected || !callpilotUrl) return
-    const onVisible = () => { if (document.visibilityState === 'visible') useCallStore.getState().wake() }
+    const onVisible = () => { if (document.visibilityState === 'visible') wakeServer().catch(() => {}) }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [callpilotUrl, callpilotConnected])
@@ -117,7 +116,9 @@ export default function App() {
           </div>
         )}
 
-        {appView === 'calls' ? <Calls onOpenSettings={() => setSettingsOpen(true)} /> : <TaskList />}
+        {appView === 'calls'
+          ? <CallPilotPage url={callpilotUrl} connected={callpilotConnected} onOpenSettings={() => setSettingsOpen(true)} />
+          : <TaskList />}
 
         <button
           type="button"
@@ -161,5 +162,26 @@ export default function App() {
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
       <LogsSheet />
     </div>
+  )
+}
+
+/** Calls opens the CallPilot site itself, so that page updates without a new app install. */
+function CallPilotPage({ url, connected, onOpenSettings }) {
+  const src = normalizeServerUrl(url)
+  if (!connected || !src) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-3">
+        <p className="text-sm text-gray-600">Add your CallPilot address in Settings. Calls opens that page.</p>
+        <button type="button" onClick={onOpenSettings} className="bg-primary text-white text-sm font-medium px-4 py-2.5 rounded-xl">Open settings</button>
+      </div>
+    )
+  }
+  return (
+    <iframe
+      title="Calls"
+      src={src}
+      className="flex-1 w-full min-h-0 border-0 bg-white"
+      allow="microphone *; autoplay; speaker-selection"
+    />
   )
 }

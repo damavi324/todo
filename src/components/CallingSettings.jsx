@@ -21,11 +21,8 @@ export default function CallingSettings() {
     try {
       const health = await connectCallPilot(url, passcode)
       setPasscode('')
-      setOk(`Connected. Calls will be made for ${health.owner || 'you'}.`)
-      const calls = useCallStore.getState()
-      calls.disconnect()
-      calls.connect()
-      calls.loadHistory()
+      setOk(`Connected. Calls opens ${normalizeServerUrl(url)}.`)
+      useCallStore.getState().disconnect()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -44,7 +41,7 @@ export default function CallingSettings() {
     <form onSubmit={connect} className="px-5 py-4 space-y-3">
       <p className="text-xs text-gray-500 flex gap-2">
         <Phone size={14} className="flex-shrink-0 mt-0.5 text-emerald-600" />
-        <span>Calls, Pilot and the smart voice button run through your CallPilot server. Use its permanent cloud address, or the link your PC prints after <code className="font-mono">npm run go</code>.</span>
+        <span>Calls opens this CallPilot page inside the app, so updates to that page show up without a new install. Use its permanent cloud address, or the link your PC prints after <code className="font-mono">npm run go</code>.</span>
       </p>
       <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://callpilot.onrender.com" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false}
         className="w-full text-sm bg-gray-50 rounded-xl px-3 py-2.5 outline-none border border-gray-200 focus:border-primary" />

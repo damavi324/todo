@@ -54,11 +54,11 @@ function tooManyTries(req) {
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
-  'X-Frame-Options': 'DENY',
   'Strict-Transport-Security': 'max-age=31536000',
   'Permissions-Policy': 'camera=(), geolocation=(), microphone=(self)',
 };
-const CSP = "default-src 'self'; script-src 'self' blob: https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' wss: https: blob:; media-src 'self' blob: https:; img-src 'self' data:; worker-src 'self' blob:; frame-ancestors 'none'";
+// The phone app shows this page inside Calls. Allow that app, and a page opened on its own.
+const CSP = "default-src 'self'; script-src 'self' blob: https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' wss: https: blob:; media-src 'self' blob: https:; img-src 'self' data:; worker-src 'self' blob:; frame-ancestors 'self' https://localhost http://localhost http://localhost:* https://localhost:* capacitor://localhost ionic://localhost";
 
 function send(res, status, body, type = 'application/json') {
   const data = type === 'application/json' ? JSON.stringify(body) : body;
@@ -222,7 +222,7 @@ async function route(req, res) {
     const body = await readBody(req);
     if (config.passcode && tooManyTries(req)) return send(res, 429, { error: 'Too many tries. Wait 10 minutes.' });
     if (!config.passcode || safeEq(body.passcode, config.passcode)) {
-      res.setHeader('Set-Cookie', `cp_auth=${authValue || ''}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=2592000`);
+      res.setHeader('Set-Cookie', `cp_auth=${authValue || ''}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=2592000`);
       return send(res, 200, { ok: true, token: authValue || '', owner: config.ownerName, assistant: config.assistantName });
     }
     console.warn('[auth] wrong passcode attempt');
