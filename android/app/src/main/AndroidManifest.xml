@@ -63,6 +63,14 @@
         </receiver>
 
         <service
+            android:name=".ReminderPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <service
             android:name=".CallSessionService"
             android:exported="false"
             android:foregroundServiceType="microphone|dataSync" />

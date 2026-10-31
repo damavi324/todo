@@ -3,7 +3,9 @@ import { GoogleAuthProvider, onAuthStateChanged, signInWithCredential, signOut }
 import { collection, deleteDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore'
 import { cloud, isCloudConfigured } from './firebase'
 import { useTaskStore, DEFAULT_LISTS, DEFAULT_SETTINGS, mergeProfile } from '../store/useTaskStore'
+import { Capacitor } from '@capacitor/core'
 import { syncReminders } from './notifications'
+import VoiceReminder from '../plugins/VoiceReminder'
 import { archiveCall, archivedCall, archivedList, forgetCall, onCallArchived, mergeHistory } from './callArchive'
 import { useCallStore } from '../store/useCallStore'
 
@@ -230,6 +232,25 @@ function updateStatus(metadata) {
   if (next !== status) setStatus(next, { email })
 }
 
+/**
+ * Lets the reminders function reach this phone: its push address and time zone go in
+ * users/{uid}/devices/{token}. A task changed on another device then sets or clears the alarm here at once.
+ */
+async function registerDevice(db, uid) {
+  if (!Capacitor.isNativePlatform()) return
+  try {
+    const { token } = await VoiceReminder.getPushToken()
+    await setDoc(doc(db, 'users', uid, 'devices', token), {
+      platform: Capacitor.getPlatform(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      updatedAt: new Date().toISOString(),
+    })
+  } catch (e) {
+    // No push in this build, or offline: reminders still sync whenever the app opens.
+    console.warn('Push reminders unavailable:', e?.message || e)
+  }
+}
+
 const byNewest = (items) => items.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
 // Inbox first, then lists in the order they were made.
 const listOrder = (items) => items.sort((a, b) =>
@@ -266,6 +287,7 @@ function begin(user) {
     mirrorCalls(db, user.uid, { mayUpload }),
   ]
   stopSync = () => { stops.forEach((stop) => stop()); stopSync = null }
+  registerDevice(db, user.uid)
 }
 
 /** Start following the signed-in account. Call once when the app starts. */

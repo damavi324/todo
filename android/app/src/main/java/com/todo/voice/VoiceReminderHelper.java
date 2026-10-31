@@ -29,6 +29,8 @@ public final class VoiceReminderHelper {
     public static final String PREFS = "voice_reminders";
     public static final String KEY_ITEMS = "items";
     public static final String KEY_COMPLETED = "completed";
+    public static final String KEY_SETTINGS = "settings";
+    public static final String KEY_PUSH_TOKEN = "push_token";
 
     public static final String ACTION_FIRE = "com.todo.voice.FIRE_REMINDER";
     public static final String ACTION_DISMISSED = "com.todo.voice.REMINDER_DISMISSED";
@@ -79,60 +81,23 @@ public final class VoiceReminderHelper {
         float pitch
     ) throws JSONException {
         ensureChannel(context);
+        // Kept so a reminder pushed from another device while the app is closed alerts the same way.
+        JSONObject settings = new JSONObject()
+            .put("sticky", sticky)
+            .put("repeat", repeatMinutes)
+            .put("speak", speak)
+            .put("name", name != null ? name : "")
+            .put("voice", voice != null ? voice : "")
+            .put("pitch", pitch);
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_SETTINGS, settings.toString()).apply();
+
         JSONObject root = readRoot(context);
         long now = System.currentTimeMillis();
         Set<String> keep = new HashSet<>();
 
         for (int i = 0; i < reminders.length(); i++) {
             JSONObject r = reminders.getJSONObject(i);
-            int id = r.getInt("id");
-            String key = String.valueOf(id);
-            long at = r.getLong("at");
-            String title = r.optString("title", "Reminder");
-            String body = r.optString("body", "");
-            JSONObject existing = root.optJSONObject(key);
-            // A reminder, as opposed to a task, alerts a single time: never sticky, never repeated.
-            boolean once = r.optBoolean("once");
-            boolean itemSticky = sticky && !once;
-            int itemRepeat = once ? 0 : repeatMinutes;
-            boolean itemSpeak = speak && !r.optBoolean("quiet");
-
-            if (at > now) {
-                if (existing != null && existing.optBoolean("fired")) {
-                    NotificationManagerCompat.from(context).cancel(id);
-                }
-                JSONObject item = new JSONObject();
-                item.put("id", id);
-                item.put("taskId", r.optString("taskId", ""));
-                item.put("at", at);
-                item.put("fired", false);
-                item.put("alerts", 0);
-                item.put("once", once);
-                applyDetails(item, title, body, itemSticky, itemRepeat, itemSpeak, name, voice, pitch);
-                root.put(key, item);
-                scheduleAlarm(context, id, at);
-                keep.add(key);
-            } else if (existing != null && existing.optLong("at") == at) {
-                // Already fired (or snoozed) for this due time: keep it alive, refresh what changed.
-                boolean wasSticky = existing.optBoolean("sticky");
-                boolean changed =
-                    wasSticky != itemSticky ||
-                    existing.optInt("repeat") != itemRepeat ||
-                    !title.equals(existing.optString("title")) ||
-                    !body.equals(existing.optString("body"));
-                existing.put("once", once);
-                applyDetails(existing, title, body, itemSticky, itemRepeat, itemSpeak, name, voice, pitch);
-                if (changed && existing.optBoolean("fired")) {
-                    if (itemSticky || wasSticky) showNotification(context, existing, true);
-                    if (itemSticky && itemRepeat > 0) {
-                        scheduleAlarm(context, id, now + itemRepeat * MINUTE_MS);
-                    } else {
-                        cancelAlarm(context, id);
-                    }
-                }
-                keep.add(key);
-            }
-            // Otherwise the due time had already passed when the task was saved: no reminder.
+            if (putReminder(context, root, r, settings, now)) keep.add(String.valueOf(r.getInt("id")));
         }
 
         List<String> stale = new ArrayList<>();
@@ -141,14 +106,110 @@ public final class VoiceReminderHelper {
             String key = keys.next();
             if (!keep.contains(key)) stale.add(key);
         }
-        for (String key : stale) {
-            int id = Integer.parseInt(key);
-            cancelAlarm(context, id);
-            NotificationManagerCompat.from(context).cancel(id);
-            root.remove(key);
-        }
+        for (String key : stale) dropReminder(context, root, Integer.parseInt(key));
 
         writeRoot(context, root);
+    }
+
+    /**
+     * Add or update one reminder, as sync() would for it. Used when a task changed on another device and
+     * the change arrived by push. Returns false when its time has already passed.
+     */
+    public static synchronized boolean upsert(Context context, JSONObject reminder) throws JSONException {
+        ensureChannel(context);
+        JSONObject root = readRoot(context);
+        boolean kept = putReminder(context, root, reminder, readSettings(context), System.currentTimeMillis());
+        if (!kept) dropReminder(context, root, reminder.getInt("id"));
+        writeRoot(context, root);
+        return kept;
+    }
+
+    /** Remove one reminder: its task was finished, deleted or undated on another device. */
+    public static synchronized void remove(Context context, int id) {
+        try {
+            JSONObject root = readRoot(context);
+            dropReminder(context, root, id);
+            writeRoot(context, root);
+        } catch (JSONException ignored) {}
+    }
+
+    private static JSONObject readSettings(Context context) {
+        String raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_SETTINGS, null);
+        try {
+            if (raw != null) return new JSONObject(raw);
+        } catch (JSONException ignored) {}
+        try {
+            return new JSONObject().put("sticky", true).put("repeat", 10).put("speak", true).put("pitch", 1);
+        } catch (JSONException e) {
+            return new JSONObject();
+        }
+    }
+
+    private static void dropReminder(Context context, JSONObject root, int id) {
+        cancelAlarm(context, id);
+        NotificationManagerCompat.from(context).cancel(id);
+        root.remove(String.valueOf(id));
+    }
+
+    /** Store and schedule one reminder. Returns whether it should be kept. */
+    private static boolean putReminder(Context context, JSONObject root, JSONObject r, JSONObject s, long now)
+        throws JSONException {
+        int id = r.getInt("id");
+        String key = String.valueOf(id);
+        long at = r.getLong("at");
+        String title = r.optString("title", "Reminder");
+        String body = r.optString("body", "");
+        JSONObject existing = root.optJSONObject(key);
+        boolean sticky = s.optBoolean("sticky", true);
+        int repeatMinutes = s.optInt("repeat", 0);
+        boolean speak = s.optBoolean("speak", true);
+        String name = s.optString("name", "");
+        String voice = s.optString("voice", "");
+        float pitch = (float) s.optDouble("pitch", 1);
+        // A reminder, as opposed to a task, alerts a single time: never sticky, never repeated.
+        boolean once = r.optBoolean("once");
+        boolean itemSticky = sticky && !once;
+        int itemRepeat = once ? 0 : repeatMinutes;
+        boolean itemSpeak = speak && !r.optBoolean("quiet");
+
+        if (at > now) {
+            if (existing != null && existing.optBoolean("fired")) {
+                NotificationManagerCompat.from(context).cancel(id);
+            }
+            JSONObject item = new JSONObject();
+            item.put("id", id);
+            item.put("taskId", r.optString("taskId", ""));
+            item.put("at", at);
+            item.put("fired", false);
+            item.put("alerts", 0);
+            item.put("once", once);
+            applyDetails(item, title, body, itemSticky, itemRepeat, itemSpeak, name, voice, pitch);
+            root.put(key, item);
+            scheduleAlarm(context, id, at);
+            return true;
+        }
+        if (existing != null && existing.optLong("at") == at) {
+            // Already fired (or snoozed) for this due time: keep it alive, refresh what changed.
+            boolean wasSticky = existing.optBoolean("sticky");
+            boolean changed =
+                wasSticky != itemSticky ||
+                existing.optInt("repeat") != itemRepeat ||
+                !title.equals(existing.optString("title")) ||
+                !body.equals(existing.optString("body"));
+            existing.put("once", once);
+            applyDetails(existing, title, body, itemSticky, itemRepeat, itemSpeak, name, voice, pitch);
+            if (changed && existing.optBoolean("fired")) {
+                if (itemSticky || wasSticky) showNotification(context, existing, true);
+                if (itemSticky && itemRepeat > 0) {
+                    scheduleAlarm(context, id, now + itemRepeat * MINUTE_MS);
+                } else {
+                    cancelAlarm(context, id);
+                }
+            }
+            return true;
+        }
+        // Otherwise the due time had already passed when the task was saved: no reminder.
+        return false;
     }
 
     private static void applyDetails(

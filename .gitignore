@@ -36,3 +36,8 @@ android/local.properties
 *.sln
 *.sw?
 !android/app/todo-dev.keystore
+
+# Firebase local files
+functions/node_modules
+.firebase/
+firestore-debug.log

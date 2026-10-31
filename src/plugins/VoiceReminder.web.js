@@ -4,6 +4,11 @@ import { WebPlugin } from '@capacitor/core'
 export class VoiceReminderWeb extends WebPlugin {
   async sync() {}
 
+  // Browsers get reminders from the open tab instead of pushes.
+  async getPushToken() {
+    throw this.unavailable('Push reminders are for the Android app')
+  }
+
   async consumeCompleted() {
     return { taskIds: [] }
   }

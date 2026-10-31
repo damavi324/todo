@@ -15,6 +15,8 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.messaging.FirebaseMessaging;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -115,6 +117,22 @@ public class VoiceReminderPlugin extends Plugin {
         } catch (JSONException e) {
             call.reject("Invalid reminders: " + e.getMessage());
         }
+    }
+
+    /** This phone's push address, so reminders changed on other devices can reach it while the app is closed. */
+    @PluginMethod
+    public void getPushToken(PluginCall call) {
+        if (FirebaseApp.getApps(getContext()).isEmpty()) {
+            call.reject("Push isn't set up in this build (google-services.json is missing)");
+            return;
+        }
+        FirebaseMessaging.getInstance().getToken().addOnCompleteListener((task) -> {
+            if (task.isSuccessful() && task.getResult() != null) {
+                call.resolve(new JSObject().put("token", task.getResult()));
+            } else {
+                call.reject("Could not get a push token");
+            }
+        });
     }
 
     @PluginMethod
