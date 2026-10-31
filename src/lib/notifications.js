@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core'
 import { useTaskStore } from '../store/useTaskStore'
 import VoiceReminder from '../plugins/VoiceReminder'
 import { dueDateTime } from './dates'
+import { isReminder } from './taskKind'
 
 const isNative = () => Capacitor.isNativePlatform()
 
@@ -54,6 +55,9 @@ export async function syncReminders() {
       at: dueDateTime(t).getTime(),
       title: t.title || 'Reminder',
       body: t.notes || '',
+      // Reminders alert a single time. All-day ones, like holidays, do it without speaking.
+      once: isReminder(t),
+      quiet: isReminder(t) && !t.dueTime,
     }))
     await VoiceReminder.sync({
       reminders,
@@ -61,11 +65,23 @@ export async function syncReminders() {
       repeatMinutes: Number(settings.notificationRepeatMinutes) || 0,
       speak: settings.voiceRemindersEnabled !== false,
       name: (settings.userName || '').trim(),
+      voice: settings.voiceName || '',
+      pitch: Number(settings.voicePitch) || 1,
     })
     return
   }
 
   syncWebTimers(pending)
+}
+
+/** Say a reminder out loud right now, exactly as it sounds when it goes off. */
+export async function announce(title) {
+  const { settings } = useTaskStore.getState()
+  await VoiceReminder.announce({
+    text: spokenText(title, (settings.userName || '').trim()),
+    voice: settings.voiceName || '',
+    pitch: Number(settings.voicePitch) || 1,
+  })
 }
 
 /** Apply "Mark Done" taps made on notifications while the app was closed or in the background. */
@@ -98,14 +114,16 @@ function fireWebNotification(taskId, again) {
   const task = tasks.find((t) => t.id === taskId)
   if (!task || task.completed) return
 
-  if (settings.voiceRemindersEnabled !== false && 'speechSynthesis' in window) {
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(
-      new SpeechSynthesisUtterance(spokenText(task.title, (settings.userName || '').trim(), again))
-    )
+  const once = isReminder(task)
+  if (settings.voiceRemindersEnabled !== false && !(once && !task.dueTime)) {
+    VoiceReminder.announce({
+      text: spokenText(task.title, (settings.userName || '').trim(), again),
+      voice: settings.voiceName || '',
+      pitch: Number(settings.voicePitch) || 1,
+    }).catch(() => {})
   }
 
-  const sticky = settings.notificationStyle === 'sticky'
+  const sticky = settings.notificationStyle === 'sticky' && !once
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     new Notification(task.title, {
       body: task.notes || 'Due now',

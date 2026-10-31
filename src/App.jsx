@@ -9,6 +9,8 @@ import { useTaskStore } from './store/useTaskStore'
 import { syncReminders, applyNotificationCompletions } from './lib/notifications'
 import { autoImport } from './lib/googleCalendar'
 import { parseSpokenTask, isGeminiConfigured } from './lib/voiceTask'
+import { saveTask } from './lib/saveTask'
+import { dueDateTime, formatDue } from './lib/dates'
 import VoiceReminder from './plugins/VoiceReminder'
 import SpeechCapture from './plugins/SpeechCapture'
 
@@ -16,6 +18,7 @@ import SpeechCapture from './plugins/SpeechCapture'
 async function refresh() {
   await applyNotificationCompletions()
   await autoImport()
+  useTaskStore.getState().dropPastReminders()
   await syncReminders()
 }
 
@@ -37,8 +40,14 @@ export default function App() {
       setVoiceStatus(isGeminiConfigured() ? 'Speak now. Gemini will fill in the task.' : 'Speak now.')
       const { text } = await SpeechCapture.listen()
       setVoiceStatus('Working out the task…')
-      const parsed = await parseSpokenTask(text)
-      setDraft(parsed)
+      const { parseWarning, ...parsed } = await parseSpokenTask(text)
+      // A clear task with a day and a time still ahead is saved straight away. Anything else is shown to check.
+      if (!parseWarning && parsed.dueDate && parsed.dueTime && dueDateTime(parsed) > new Date()) {
+        const task = await saveTask({ ...parsed, listId: 'inbox' })
+        setVoiceStatus(`Reminder set: ${task.title}, ${formatDue(task.dueDate, task.dueTime)}`)
+        return
+      }
+      setDraft({ ...parsed, parseWarning })
       setVoiceStatus('')
       setAddOpen(true)
     } catch (error) {

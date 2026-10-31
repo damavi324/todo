@@ -32,4 +32,33 @@ export class VoiceReminderWeb extends WebPlugin {
   }
 
   async openExactAlarmSettings() {}
+
+  async getVoices() {
+    if (!('speechSynthesis' in window)) return { voices: [] }
+    let list = window.speechSynthesis.getVoices()
+    if (list.length === 0) {
+      // Browsers load the voice list in the background; wait briefly for it.
+      await new Promise((resolve) => {
+        window.speechSynthesis.addEventListener('voiceschanged', resolve, { once: true })
+        setTimeout(resolve, 1000)
+      })
+      list = window.speechSynthesis.getVoices()
+    }
+    const language = (navigator.language || 'en').split('-')[0]
+    return {
+      voices: list
+        .filter((v) => v.lang.split('-')[0] === language)
+        .map((v) => ({ id: v.voiceURI, name: v.name, locale: v.lang })),
+    }
+  }
+
+  async announce({ text, voice, pitch }) {
+    if (!('speechSynthesis' in window)) throw new Error('This browser cannot speak')
+    const utterance = new SpeechSynthesisUtterance(text)
+    const chosen = voice && window.speechSynthesis.getVoices().find((v) => v.voiceURI === voice)
+    if (chosen) utterance.voice = chosen
+    utterance.pitch = pitch || 1
+    window.speechSynthesis.cancel()
+    window.speechSynthesis.speak(utterance)
+  }
 }

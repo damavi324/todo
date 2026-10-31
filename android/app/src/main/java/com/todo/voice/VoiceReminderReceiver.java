@@ -7,8 +7,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
-import android.speech.tts.Voice;
-import java.util.Locale;
 import java.util.UUID;
 import org.json.JSONObject;
 
@@ -26,6 +24,7 @@ public class VoiceReminderReceiver extends BroadcastReceiver {
         switch (action) {
             case Intent.ACTION_BOOT_COMPLETED:
             case "android.intent.action.QUICKBOOT_POWERON":
+            case Intent.ACTION_MY_PACKAGE_REPLACED:
                 VoiceReminderHelper.onBoot(app);
                 return;
             case VoiceReminderHelper.ACTION_DISMISSED:
@@ -40,7 +39,7 @@ public class VoiceReminderReceiver extends BroadcastReceiver {
             case VoiceReminderHelper.ACTION_FIRE:
                 JSONObject item = VoiceReminderHelper.onFire(app, id);
                 if (item != null && item.optBoolean("speak", true)) {
-                    speak(app, spokenText(item));
+                    speak(app, spokenText(item), item.optString("voice", ""), (float) item.optDouble("pitch", 1));
                 }
                 return;
             default:
@@ -57,7 +56,7 @@ public class VoiceReminderReceiver extends BroadcastReceiver {
         return (hey.isEmpty() ? "You have a reminder: " : hey + "you have a reminder: ") + title + ".";
     }
 
-    private void speak(Context app, String text) {
+    private void speak(Context app, String text, String voice, float pitch) {
         final PendingResult pendingResult = goAsync();
         final Handler handler = new Handler(Looper.getMainLooper());
         final boolean[] finished = { false };
@@ -76,9 +75,7 @@ public class VoiceReminderReceiver extends BroadcastReceiver {
                 return;
             }
 
-            tts.setLanguage(Locale.getDefault());
-            useBestOfflineVoice(tts);
-            tts.setSpeechRate(0.95f);
+            Speech.configure(tts, voice, pitch);
 
             final Runnable done = () -> {
                 try {
@@ -106,20 +103,5 @@ public class VoiceReminderReceiver extends BroadcastReceiver {
 
             tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString());
         });
-    }
-
-    /** Engines ship several voices per language; pick the most natural one that works offline. */
-    private static void useBestOfflineVoice(TextToSpeech tts) {
-        try {
-            Voice current = tts.getVoice();
-            Locale locale = current != null ? current.getLocale() : Locale.getDefault();
-            Voice best = current;
-            for (Voice v : tts.getVoices()) {
-                if (v.isNetworkConnectionRequired() || !v.getLocale().equals(locale)) continue;
-                if (v.getFeatures() != null && v.getFeatures().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)) continue;
-                if (best == null || v.getQuality() > best.getQuality()) best = v;
-            }
-            if (best != null && best != current) tts.setVoice(best);
-        } catch (Exception ignored) {}
     }
 }

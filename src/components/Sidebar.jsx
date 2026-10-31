@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useTaskStore } from '../store/useTaskStore'
 import { Calendar, CalendarDays, List, Plus, X, Settings, CheckSquare } from 'lucide-react'
 import { parseLocalDate, startOfToday, addDays } from '../lib/dates'
+import { isReminder } from '../lib/taskKind'
 
 const SMART_LISTS = [
   { id: 'today', name: 'Today', icon: Calendar, color: '#4772FA' },
@@ -10,17 +11,18 @@ const SMART_LISTS = [
 ]
 
 export default function Sidebar({ onClose, onOpenSettings }) {
-  const { lists, selectedList, setSelectedList, addList, tasks } = useTaskStore()
+  const { lists, selectedList, setSelectedList, addList, tasks: allTasks } = useTaskStore()
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
 
   const colors = ['#4772FA', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8']
   const [pickedColor, setPickedColor] = useState(colors[0])
 
+  // Counts are of things left to do, so reminders are left out.
   const countFor = (id) => {
-    const today = startOfToday()
-    const tomorrow = addDays(today, 1)
-    if (id === 'today') return tasks.filter(t => !t.completed && t.dueDate && parseLocalDate(t.dueDate) >= today && parseLocalDate(t.dueDate) < tomorrow).length
+    const tasks = allTasks.filter((t) => !isReminder(t))
+    const tomorrow = addDays(startOfToday(), 1)
+    if (id === 'today') return tasks.filter(t => !t.completed && t.dueDate && parseLocalDate(t.dueDate) < tomorrow).length
     if (id === 'scheduled') return tasks.filter(t => !t.completed && t.dueDate).length
     if (id === 'all') return tasks.filter(t => !t.completed).length
     return tasks.filter(t => !t.completed && t.listId === id).length

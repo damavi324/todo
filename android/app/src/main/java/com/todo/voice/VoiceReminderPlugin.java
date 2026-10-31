@@ -4,6 +4,8 @@ import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.Voice;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -13,6 +15,9 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 import org.json.JSONArray;
 import org.json.JSONException;
 
@@ -23,6 +28,11 @@ import org.json.JSONException;
 public class VoiceReminderPlugin extends Plugin {
     private static VoiceReminderPlugin instance;
 
+    // Speech engine for previews. Created on first use and only touched on the UI thread.
+    private TextToSpeech tts;
+    private boolean ttsReady;
+    private final List<Runnable> ttsWaiting = new ArrayList<>();
+
     @Override
     public void load() {
         instance = this;
@@ -31,6 +41,54 @@ public class VoiceReminderPlugin extends Plugin {
     @Override
     protected void handleOnDestroy() {
         if (instance == this) instance = null;
+        if (tts != null) tts.shutdown();
+        tts = null;
+        ttsReady = false;
+    }
+
+    /** Run `use` once the speech engine is ready, or reject the call if the phone has none. */
+    private void withTts(PluginCall call, Runnable use) {
+        getActivity().runOnUiThread(() -> {
+            Runnable step = () -> {
+                if (ttsReady) use.run();
+                else call.reject("Text-to-speech is not available on this phone");
+            };
+            if (ttsReady) {
+                step.run();
+                return;
+            }
+            ttsWaiting.add(step);
+            if (tts != null) return;
+            tts = new TextToSpeech(getContext().getApplicationContext(), status -> {
+                ttsReady = status == TextToSpeech.SUCCESS;
+                List<Runnable> waiting = new ArrayList<>(ttsWaiting);
+                ttsWaiting.clear();
+                for (Runnable r : waiting) r.run();
+                if (!ttsReady) tts = null;
+            });
+        });
+    }
+
+    @PluginMethod
+    public void getVoices(PluginCall call) {
+        withTts(call, () -> {
+            JSArray voices = new JSArray();
+            for (Voice v : Speech.offlineVoices(tts)) {
+                voices.put(new JSObject().put("id", v.getName()).put("locale", v.getLocale().toLanguageTag()));
+            }
+            call.resolve(new JSObject().put("voices", voices));
+        });
+    }
+
+    /** Speak a reminder now, the way it sounds when its alarm goes off. */
+    @PluginMethod
+    public void announce(PluginCall call) {
+        String text = call.getString("text", "");
+        withTts(call, () -> {
+            Speech.configure(tts, call.getString("voice", ""), call.getFloat("pitch", 1f));
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString());
+            call.resolve();
+        });
     }
 
     /** Tell the running app that "Mark Done" was tapped on a notification. */
@@ -49,7 +107,9 @@ public class VoiceReminderPlugin extends Plugin {
                 call.getBoolean("sticky", true),
                 call.getInt("repeatMinutes", 0),
                 call.getBoolean("speak", true),
-                call.getString("name", "")
+                call.getString("name", ""),
+                call.getString("voice", ""),
+                call.getFloat("pitch", 1f)
             );
             call.resolve();
         } catch (JSONException e) {

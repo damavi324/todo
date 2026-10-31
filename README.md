@@ -1,16 +1,30 @@
-# React + Vite
+# ToDo
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A voice-first reminders and to-do app: React + Vite, wrapped as an Android app with Capacitor.
 
-Currently, two official plugins are available:
+- Say a task ("remind me to call mom tomorrow at 5") and it becomes a task with a date and time.
+  Gemini does the parsing when `VITE_GEMINI_API_KEY` is set; otherwise a small built-in parser does.
+- Reminders fire even when the app is closed (exact alarms), speak the task aloud, and can stay
+  pinned until you tap **Mark Done**.
+- Optional two-way Google Calendar sync: tasks with a date are pushed as events, and the next two
+  weeks of events are imported as tasks.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Setup
 
-## React Compiler
+1. `npm install`
+2. Copy `.env.example` to `.env.local` and fill in `VITE_GOOGLE_WEB_CLIENT_ID` (and optionally `VITE_GEMINI_API_KEY`).
+3. Web: `npm run dev`
+4. Android debug APK: `npm run apk:debug` (Windows). The APK lands in `android/app/build/outputs/apk/debug/`.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The Android build uses `vite build --mode android`, which ships a self-removing service worker
+instead of the PWA cache (files already come from the APK).
 
-## Expanding the ESLint configuration
+## Where things live
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+| Path | What it does |
+| --- | --- |
+| `src/store/useTaskStore.js` | Tasks, lists and settings (Zustand, saved to localStorage) |
+| `src/lib/notifications.js` | `syncReminders()`: the one place that makes scheduled reminders match the tasks |
+| `src/lib/voiceTask.js` | Turns a spoken sentence into title, date, time and priority |
+| `src/lib/googleCalendar.js` | Google sign-in, event push, and calendar import |
+| `android/app/src/main/java/com/todo/voice/` | Native alarms, notifications, text-to-speech and speech capture |

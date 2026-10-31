@@ -3,6 +3,8 @@ import { useTaskStore } from '../store/useTaskStore'
 import TaskItem from './TaskItem'
 import AddTaskModal from './AddTaskModal'
 import { CheckCircle2 } from 'lucide-react'
+import { dueDateTime, startOfToday, addDays } from '../lib/dates'
+import { isReminder } from '../lib/taskKind'
 
 const VIEW_LABELS = {
   today: 'Today',
@@ -11,14 +13,23 @@ const VIEW_LABELS = {
 }
 
 export default function TaskList() {
-  const { selectedList, lists, getFilteredTasks } = useTaskStore()
+  const { selectedList, lists, getFilteredTasks, tasks: allTasks } = useTaskStore()
   const [editTask, setEditTask] = useState(null)
   const [showModal, setShowModal] = useState(false)
 
   const tasks = getFilteredTasks(selectedList)
   const pending = tasks.filter((t) => !t.completed)
+  // Reminders are listed with everything else but aren't something left to do.
+  const remaining = pending.filter((t) => !isReminder(t)).length
   const done = tasks.filter((t) => t.completed)
   const [showDone, setShowDone] = useState(false)
+
+  // Today also lists what is coming next, soonest first, so future tasks and calendar events aren't hidden.
+  const tomorrow = addDays(startOfToday(), 1)
+  const upcoming = selectedList !== 'today' ? [] : allTasks
+    .filter((t) => !t.completed && dueDateTime(t) >= tomorrow)
+    .sort((a, b) => dueDateTime(a) - dueDateTime(b))
+  const openEdit = (t) => { setEditTask(t); setShowModal(true) }
 
   const listLabel =
     VIEW_LABELS[selectedList] ||
@@ -38,11 +49,15 @@ export default function TaskList() {
             {listLabel}
           </h1>
           <p className="text-sm text-gray-400 mt-0.5">
-            {pending.length} task{pending.length !== 1 ? 's' : ''} remaining
+            {remaining} task{remaining !== 1 ? 's' : ''} remaining
           </p>
         </div>
 
-        {pending.length === 0 && done.length === 0 && (
+        {pending.length === 0 && done.length === 0 && upcoming.length > 0 && (
+          <p className="text-sm text-gray-400 pb-2">Nothing due today.</p>
+        )}
+
+        {pending.length === 0 && done.length === 0 && upcoming.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <CheckCircle2 size={48} className="text-gray-200 mb-3" />
             <p className="text-gray-400 font-medium">All clear!</p>
@@ -51,8 +66,17 @@ export default function TaskList() {
         )}
 
         {pending.map((task) => (
-          <TaskItem key={task.id} task={task} onEdit={(t) => { setEditTask(t); setShowModal(true) }} />
+          <TaskItem key={task.id} task={task} onEdit={openEdit} />
         ))}
+
+        {upcoming.length > 0 && (
+          <div className="mt-4">
+            <p className="text-xs text-gray-400 font-medium mb-2">Upcoming ({upcoming.length})</p>
+            {upcoming.map((task) => (
+              <TaskItem key={task.id} task={task} onEdit={openEdit} />
+            ))}
+          </div>
+        )}
 
         {done.length > 0 && (
           <div className="mt-4">
@@ -62,7 +86,7 @@ export default function TaskList() {
               {showDone ? '▾' : '▸'} Completed ({done.length})
             </button>
             {showDone && done.map((task) => (
-              <TaskItem key={task.id} task={task} onEdit={(t) => { setEditTask(t); setShowModal(true) }} />
+              <TaskItem key={task.id} task={task} onEdit={openEdit} />
             ))}
           </div>
         )}

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { parseLocalDate, startOfToday, addDays } from '../lib/dates'
+import { parseLocalDate, startOfToday, addDays, dueDateTime } from '../lib/dates'
+import { isReminder } from '../lib/taskKind'
 
 const DEFAULT_LISTS = [
   { id: 'inbox', name: 'Inbox', color: '#4772FA' },
@@ -13,8 +14,14 @@ const DEFAULT_SETTINGS = {
   notificationRepeatMinutes: 10,
   voiceRemindersEnabled: true,
   userName: 'MK',
+  // Empty means the phone's best voice for its language.
+  voiceName: '',
+  voicePitch: 1,
   googleCalendarEnabled: false,
   googleCalendarId: 'primary',
+  // Android only: read upcoming events from the phone's calendar instead of from Google.
+  phoneCalendarEnabled: false,
+  phoneCalendarHiddenIds: [],
 }
 
 export const useTaskStore = create(
@@ -63,6 +70,13 @@ export const useTaskStore = create(
         ),
       })),
 
+      // A reminder has nothing to finish, so once its day is over it is simply removed.
+      dropPastReminders: () => set((s) => {
+        const today = startOfToday()
+        const kept = s.tasks.filter((t) => !(isReminder(t) && t.dueDate && parseLocalDate(t.dueDate) < today))
+        return kept.length === s.tasks.length ? s : { tasks: kept }
+      }),
+
       dismissCalendarEvent: (eventId) => set((s) => ({
         dismissedEventIds: [...s.dismissedEventIds.filter((e) => e !== eventId), eventId].slice(-500),
       })),
@@ -91,13 +105,16 @@ export const useTaskStore = create(
         const tomorrow = addDays(today, 1)
 
         if (listId === 'today') {
+          // Today's items, plus any task that is overdue and still open.
           return tasks.filter((t) => {
             const due = parseLocalDate(t.dueDate)
-            return due && due >= today && due < tomorrow
+            return due && due < tomorrow && (due >= today || (!t.completed && !isReminder(t)))
           })
         }
         if (listId === 'scheduled') {
-          return tasks.filter((t) => t.dueDate && !t.completed)
+          return tasks
+            .filter((t) => t.dueDate && !t.completed)
+            .sort((a, b) => dueDateTime(a) - dueDateTime(b))
         }
         if (listId === 'all') {
           return tasks

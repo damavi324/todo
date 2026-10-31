@@ -2,6 +2,17 @@ import { toLocalYMD } from './dates'
 
 const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || '').trim()
 const GEMINI_MODEL = 'gemini-2.5-flash'
+const TASK_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    title: { type: 'STRING' },
+    notes: { type: 'STRING' },
+    dueDate: { type: 'STRING' },
+    dueTime: { type: 'STRING' },
+    priority: { type: 'STRING', enum: ['none', 'low', 'medium', 'high'] },
+  },
+  required: ['title', 'notes', 'dueDate', 'dueTime', 'priority'],
+}
 
 export function isGeminiConfigured() {
   return GEMINI_API_KEY.length > 0
@@ -34,23 +45,26 @@ async function parseWithGemini(text) {
     `Today is ${toLocalYMD(now)} (${now.toLocaleDateString('en-US', { weekday: 'long' })}).`,
     `The local time is ${now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}.`,
     'Return JSON only with keys title, notes, dueDate, dueTime, priority.',
-    'dueDate is YYYY-MM-DD or an empty string when no day was mentioned.',
+    'dueDate is YYYY-MM-DD. When a time was mentioned but no day, use today, or tomorrow if that time has already passed today.',
+    'dueDate is an empty string only when neither a day nor a time was mentioned.',
     'dueTime is HH:mm in 24-hour time or an empty string when no time was mentioned.',
     'priority is one of none, low, medium, high.',
-    'title is the task itself, without the date and time words.',
+    'title is the task itself, without the date and time words and without lead-ins like "remind me to".',
     `Spoken text: ${text}`,
   ].join('\n')
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // Sent as a header rather than ?key= so the key stays out of URLs and logs.
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.1,
           responseMimeType: 'application/json',
+          responseSchema: TASK_SCHEMA,
         },
       }),
     }
@@ -91,19 +105,35 @@ function localParse(text) {
     if (hour >= 0 && hour <= 23) dueTime = `${String(hour).padStart(2, '0')}:${minute}`
   }
 
-  const title = text
+  const cleaned = text
+    .replace(/^\s*(hey[,\s]+)?(please\s+)?(remind me( to)?|don'?t forget( to)?|i need to)\s+/i, '')
     .replace(/\b(today|tomorrow)\b/ig, '')
     .replace(/\bat\s+\d{1,2}(?::\d{2})?\s*(a\.?m\.?|p\.?m\.?)?/ig, '')
+    .replace(/\s+([.,!?])/g, '$1')
     .replace(/\s+/g, ' ')
+    .replace(/[\s.,!?]+$/, '')
     .trim()
+  const title = cleaned.charAt(0).toUpperCase() + cleaned.slice(1)
 
   return normalize({ title: title || text, notes: '', dueDate, dueTime, priority: 'none' }, text)
 }
 
+/** The date (YYYY-MM-DD) of the next time the clock reads hh:mm: today, or tomorrow if that's passed. */
+export function nextDayFor(hhmm, now = new Date()) {
+  const [h, m] = hhmm.split(':').map(Number)
+  const at = new Date(now)
+  at.setHours(h, m, 0, 0)
+  if (at <= now) at.setDate(at.getDate() + 1)
+  return toLocalYMD(at)
+}
+
 function normalize(parsed, fallbackTitle) {
   const priority = ['none', 'low', 'medium', 'high'].includes(parsed.priority) ? parsed.priority : 'none'
-  const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(parsed.dueDate || '') ? parsed.dueDate : ''
-  const dueTime = /^\d{2}:\d{2}$/.test(parsed.dueTime || '') ? parsed.dueTime : ''
+  const time = String(parsed.dueTime || '').trim().match(/^(\d{1,2}):(\d{2})$/)
+  const dueTime = time && Number(time[1]) < 24 && Number(time[2]) < 60 ? `${time[1].padStart(2, '0')}:${time[2]}` : ''
+  let dueDate = /^\d{4}-\d{2}-\d{2}$/.test(parsed.dueDate || '') ? parsed.dueDate : ''
+  // "At 5pm" with no day means the next 5pm. Without a date the task would never get a reminder.
+  if (!dueDate && dueTime) dueDate = nextDayFor(dueTime)
   return {
     title: String(parsed.title || fallbackTitle).trim() || fallbackTitle,
     notes: String(parsed.notes || '').trim(),

@@ -9,10 +9,13 @@ import {
   isGoogleAuthReady,
   initGoogleAuth,
   importUpcomingEvents,
+  calendarActive,
 } from '../lib/googleCalendar'
-import { requestVoiceReminderPermissions, syncReminders, spokenText } from '../lib/notifications'
+import { requestVoiceReminderPermissions, syncReminders, spokenText, announce } from '../lib/notifications'
+import { voiceOptions, PITCHES } from '../lib/voices'
 import VoiceReminder from '../plugins/VoiceReminder'
-import { X, Calendar, Volume2, LogOut, LogIn, RefreshCw } from 'lucide-react'
+import DeviceCalendar from '../plugins/DeviceCalendar'
+import { X, Calendar, Volume2, LogOut, LogIn, RefreshCw, Play, Check } from 'lucide-react'
 
 export default function Settings({ onClose }) {
   const { settings, updateSettings } = useTaskStore()
@@ -22,17 +25,75 @@ export default function Settings({ onClose }) {
   const [busy, setBusy] = useState(false)
   const [syncMsg, setSyncMsg] = useState('')
   const [permStatus, setPermStatus] = useState(null)
+  const [voices, setVoices] = useState([])
+  const [phoneCalendars, setPhoneCalendars] = useState([])
+  const [phoneMsg, setPhoneMsg] = useState('')
   const isNative = Capacitor.isNativePlatform()
   const authConfigured = isGoogleAuthReady()
+  const readsPhone = isNative && settings.phoneCalendarEnabled
 
   useEffect(() => {
     VoiceReminder.checkPermissions()
       .then(setPermStatus)
       .catch(() => {})
+    VoiceReminder.getVoices()
+      .then((r) => setVoices(voiceOptions(r.voices || [])))
+      .catch(() => {})
     if (authConfigured) {
       initGoogleAuth().catch(() => {})
     }
   }, [authConfigured])
+
+  useEffect(() => {
+    if (!readsPhone) return
+    DeviceCalendar.listCalendars()
+      .then((r) => setPhoneCalendars(r.calendars || []))
+      .catch((e) => setPhoneMsg(e?.message || 'Could not read the phone calendar'))
+  }, [readsPhone])
+
+  const runImport = async (setMsg) => {
+    setMsg('')
+    setBusy(true)
+    try {
+      const r = await importUpcomingEvents()
+      await syncReminders()
+      setMsg(
+        r.imported + r.updated + r.removed === 0
+          ? 'Already up to date.'
+          : `Imported ${r.imported}, updated ${r.updated}, removed ${r.removed}.`
+      )
+    } catch (e) {
+      setMsg(e?.message || 'Import failed')
+      if (e?.code === 'AUTH_EXPIRED') {
+        setGcalSignedIn(false)
+        updateSettings({ googleCalendarEnabled: false })
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handlePhoneToggle = async (enabled) => {
+    setPhoneMsg('')
+    if (enabled) {
+      const perms = await DeviceCalendar.requestPermissions().catch(() => null)
+      if (perms?.calendar !== 'granted') {
+        setPhoneMsg('Calendar permission was not granted. Allow it for this app in the phone settings, then try again.')
+        return
+      }
+    }
+    updateSettings({ phoneCalendarEnabled: enabled })
+    // Switching off falls back to importing from Google, which only works while signed in.
+    if (enabled || calendarActive()) await runImport(setPhoneMsg)
+  }
+
+  const togglePhoneCalendar = async (id) => {
+    const hidden = settings.phoneCalendarHiddenIds || []
+    updateSettings({
+      phoneCalendarHiddenIds: hidden.includes(id) ? hidden.filter((h) => h !== id) : [...hidden, id],
+    })
+    await runImport(setPhoneMsg)
+  }
 
   // Reminder settings are held by the native alarm code, so push every change to it.
   const changeReminderSetting = (changes) => {
@@ -90,27 +151,7 @@ export default function Settings({ onClose }) {
     }
   }
 
-  const handleImport = async () => {
-    setSyncMsg('')
-    setBusy(true)
-    try {
-      const r = await importUpcomingEvents(settings.googleCalendarId || 'primary')
-      await syncReminders()
-      setSyncMsg(
-        r.imported + r.updated + r.removed === 0
-          ? 'Already up to date.'
-          : `Imported ${r.imported}, updated ${r.updated}, removed ${r.removed}.`
-      )
-    } catch (e) {
-      setSyncMsg(e?.message || 'Import failed')
-      if (e?.code === 'AUTH_EXPIRED') {
-        setGcalSignedIn(false)
-        updateSettings({ googleCalendarEnabled: false })
-      }
-    } finally {
-      setBusy(false)
-    }
-  }
+  const handleImport = () => runImport(setSyncMsg)
 
   return (
     <div className="fixed inset-0 z-50 bg-white flex flex-col">
@@ -149,6 +190,36 @@ export default function Settings({ onClose }) {
               className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-1.5 outline-none w-40"
             />
           </Row>
+          <Row label="Voice">
+            <select
+              value={voices.some((v) => v.id === settings.voiceName) ? settings.voiceName : ''}
+              onChange={(e) => changeReminderSetting({ voiceName: e.target.value })}
+              className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-1.5 outline-none w-48">
+              <option value="">Automatic</option>
+              {voices.map((v) => (
+                <option key={v.id} value={v.id}>{v.label}</option>
+              ))}
+            </select>
+          </Row>
+          <Row label="Pitch">
+            <select
+              value={settings.voicePitch}
+              onChange={(e) => changeReminderSetting({ voicePitch: Number(e.target.value) })}
+              className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-1.5 outline-none w-48">
+              {PITCHES.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+          </Row>
+          <div className="px-5 py-3">
+            <button
+              type="button"
+              onClick={() => announce('buy groceries').catch(console.error)}
+              className="w-full bg-gray-100 text-gray-800 text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2">
+              <Play size={16} />
+              Play this voice
+            </button>
+          </div>
           <p className="text-xs text-gray-400 px-5 pb-3 flex gap-2">
             <Volume2 size={14} className="flex-shrink-0 mt-0.5" />
             <span>
@@ -204,11 +275,86 @@ export default function Settings({ onClose }) {
           </p>
         </Section>
 
+        {isNative && (
+          <Section title="Phone calendar">
+            <Row label="Show events from this phone">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!!settings.phoneCalendarEnabled}
+                disabled={busy}
+                onClick={() => handlePhoneToggle(!settings.phoneCalendarEnabled)}
+                className={`relative w-11 h-6 rounded-full transition-colors ${
+                  settings.phoneCalendarEnabled ? 'bg-primary' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                    settings.phoneCalendarEnabled ? 'translate-x-5' : ''
+                  }`}
+                />
+              </button>
+            </Row>
+            <p className="text-xs text-gray-400 px-5 py-3">
+              Reads the next two weeks from the calendar on this phone, the same events the Samsung Calendar app
+              shows, across all your accounts. Tasks you create are still saved to Google Calendar below.
+            </p>
+            {readsPhone && phoneCalendars.length > 0 && (
+              <div className="px-5 pb-2">
+                {phoneCalendars.map((c) => {
+                  const shown = !(settings.phoneCalendarHiddenIds || []).includes(c.id)
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={shown}
+                      disabled={busy}
+                      onClick={() => togglePhoneCalendar(c.id)}
+                      className="w-full flex items-center gap-3 py-2 text-left"
+                    >
+                      <span
+                        className={`w-5 h-5 rounded-md border-2 flex-shrink-0 flex items-center justify-center ${
+                          shown ? 'bg-primary border-primary' : 'border-gray-300'
+                        }`}
+                      >
+                        {shown && <Check size={14} className="text-white" />}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm text-gray-700 truncate">{c.name || 'Calendar'}</span>
+                        {c.account && c.account !== c.name && (
+                          <span className="block text-xs text-gray-400 truncate">{c.account}</span>
+                        )}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            {readsPhone && (
+              <div className="px-5 pb-3">
+                <button
+                  type="button"
+                  onClick={() => runImport(setPhoneMsg)}
+                  disabled={busy}
+                  className="w-full bg-gray-100 text-gray-800 text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40"
+                >
+                  <RefreshCw size={16} />
+                  Sync calendar now
+                </button>
+              </div>
+            )}
+            {phoneMsg && <p className="text-xs text-gray-500 px-5 pb-3">{phoneMsg}</p>}
+          </Section>
+        )}
+
         <Section title="Google Calendar">
           {!gcalSignedIn ? (
             <div className="px-5 pb-4 space-y-3">
               <p className="text-xs text-gray-500">
-                Sign in with Google to create Calendar events from tasks and import upcoming events.
+                {readsPhone
+                  ? 'Sign in with Google to create Calendar events from tasks.'
+                  : 'Sign in with Google to create Calendar events from tasks and import upcoming events.'}
                 Uses Google&apos;s account picker on your phone — no Client ID pasted in the app.
               </p>
               {!authConfigured && (
@@ -249,18 +395,22 @@ export default function Settings({ onClose }) {
                   className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-1.5 outline-none w-40"
                 />
               </Row>
-              <button
-                type="button"
-                onClick={handleImport}
-                disabled={busy}
-                className="w-full bg-gray-100 text-gray-800 text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40"
-              >
-                <RefreshCw size={16} />
-                Sync calendar now
-              </button>
-              <p className="text-xs text-gray-400">
-                The next two weeks of calendar events are imported automatically whenever you open the app.
-              </p>
+              {!readsPhone && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleImport}
+                    disabled={busy}
+                    className="w-full bg-gray-100 text-gray-800 text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40"
+                  >
+                    <RefreshCw size={16} />
+                    Sync calendar now
+                  </button>
+                  <p className="text-xs text-gray-400">
+                    The next two weeks of calendar events are imported automatically whenever you open the app.
+                  </p>
+                </>
+              )}
               {syncMsg && <p className="text-xs text-gray-500">{syncMsg}</p>}
               <button
                 onClick={handleSignOut}

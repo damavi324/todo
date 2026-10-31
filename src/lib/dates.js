@@ -42,3 +42,16 @@ export function dueDateTime(task) {
   }
   return due
 }
+
+/** Short label for a due date: "Today 17:00", "Tomorrow", "Oct 14 09:30". */
+export function formatDue(date, time) {
+  const d = parseLocalDate(date)
+  if (!d) return null
+  const today = startOfToday()
+  const tomorrow = addDays(today, 1)
+  let label
+  if (d >= today && d < tomorrow) label = 'Today'
+  else if (d >= tomorrow && d < addDays(today, 2)) label = 'Tomorrow'
+  else label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return time ? `${label} ${time}` : label
+}

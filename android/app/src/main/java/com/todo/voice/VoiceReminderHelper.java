@@ -74,7 +74,9 @@ public final class VoiceReminderHelper {
         boolean sticky,
         int repeatMinutes,
         boolean speak,
-        String name
+        String name,
+        String voice,
+        float pitch
     ) throws JSONException {
         ensureChannel(context);
         JSONObject root = readRoot(context);
@@ -89,6 +91,11 @@ public final class VoiceReminderHelper {
             String title = r.optString("title", "Reminder");
             String body = r.optString("body", "");
             JSONObject existing = root.optJSONObject(key);
+            // A reminder, as opposed to a task, alerts a single time: never sticky, never repeated.
+            boolean once = r.optBoolean("once");
+            boolean itemSticky = sticky && !once;
+            int itemRepeat = once ? 0 : repeatMinutes;
+            boolean itemSpeak = speak && !r.optBoolean("quiet");
 
             if (at > now) {
                 if (existing != null && existing.optBoolean("fired")) {
@@ -100,7 +107,8 @@ public final class VoiceReminderHelper {
                 item.put("at", at);
                 item.put("fired", false);
                 item.put("alerts", 0);
-                applyDetails(item, title, body, sticky, repeatMinutes, speak, name);
+                item.put("once", once);
+                applyDetails(item, title, body, itemSticky, itemRepeat, itemSpeak, name, voice, pitch);
                 root.put(key, item);
                 scheduleAlarm(context, id, at);
                 keep.add(key);
@@ -108,15 +116,16 @@ public final class VoiceReminderHelper {
                 // Already fired (or snoozed) for this due time: keep it alive, refresh what changed.
                 boolean wasSticky = existing.optBoolean("sticky");
                 boolean changed =
-                    wasSticky != sticky ||
-                    existing.optInt("repeat") != repeatMinutes ||
+                    wasSticky != itemSticky ||
+                    existing.optInt("repeat") != itemRepeat ||
                     !title.equals(existing.optString("title")) ||
                     !body.equals(existing.optString("body"));
-                applyDetails(existing, title, body, sticky, repeatMinutes, speak, name);
+                existing.put("once", once);
+                applyDetails(existing, title, body, itemSticky, itemRepeat, itemSpeak, name, voice, pitch);
                 if (changed && existing.optBoolean("fired")) {
-                    if (sticky || wasSticky) showNotification(context, existing, true);
-                    if (sticky && repeatMinutes > 0) {
-                        scheduleAlarm(context, id, now + repeatMinutes * MINUTE_MS);
+                    if (itemSticky || wasSticky) showNotification(context, existing, true);
+                    if (itemSticky && itemRepeat > 0) {
+                        scheduleAlarm(context, id, now + itemRepeat * MINUTE_MS);
                     } else {
                         cancelAlarm(context, id);
                     }
@@ -149,7 +158,9 @@ public final class VoiceReminderHelper {
         boolean sticky,
         int repeatMinutes,
         boolean speak,
-        String name
+        String name,
+        String voice,
+        float pitch
     ) throws JSONException {
         item.put("title", title);
         item.put("body", body);
@@ -157,6 +168,8 @@ public final class VoiceReminderHelper {
         item.put("repeat", repeatMinutes);
         item.put("speak", speak);
         item.put("name", name != null ? name : "");
+        item.put("voice", voice != null ? voice : "");
+        item.put("pitch", pitch);
     }
 
     /** Alarm went off. Returns the reminder so the caller can speak it, or null if the task is no longer pending. */
@@ -213,13 +226,15 @@ public final class VoiceReminderHelper {
             JSONObject root = readRoot(context);
             JSONObject item = root.optJSONObject(String.valueOf(id));
             if (item == null) return;
+            long until = System.currentTimeMillis() + SNOOZE_MS;
             item.put("fired", false);
+            item.put("snoozeUntil", until);
             writeRoot(context, root);
-            scheduleAlarm(context, id, System.currentTimeMillis() + SNOOZE_MS);
+            scheduleAlarm(context, id, until);
         } catch (JSONException ignored) {}
     }
 
-    /** Alarms and notifications are lost on reboot; restore both. */
+    /** Alarms and notifications are lost on reboot and when the app is updated; restore both. */
     public static synchronized void onBoot(Context context) {
         try {
             JSONObject root = readRoot(context);
@@ -234,7 +249,9 @@ public final class VoiceReminderHelper {
                     int repeat = item.optInt("repeat");
                     if (repeat > 0) scheduleAlarm(context, id, now + repeat * MINUTE_MS);
                 } else {
-                    scheduleAlarm(context, id, Math.max(item.optLong("at"), now + 5000));
+                    // A snoozed reminder resumes at its snooze time, not its original due time.
+                    long next = Math.max(item.optLong("at"), item.optLong("snoozeUntil", 0));
+                    scheduleAlarm(context, id, Math.max(next, now + 5000));
                 }
             }
         } catch (JSONException ignored) {}
@@ -302,9 +319,10 @@ public final class VoiceReminderHelper {
             .setAutoCancel(!sticky)
             .setSilent(silent)
             .setContentIntent(contentIntent)
-            .setDeleteIntent(receiverIntent(context, ACTION_DISMISSED, id))
-            .addAction(0, "Mark Done", receiverIntent(context, ACTION_DONE, id))
-            .addAction(0, "Snooze 10m", receiverIntent(context, ACTION_SNOOZE, id));
+            .setDeleteIntent(receiverIntent(context, ACTION_DISMISSED, id));
+        // A reminder has nothing to mark done.
+        if (!item.optBoolean("once")) builder.addAction(0, "Mark Done", receiverIntent(context, ACTION_DONE, id));
+        builder.addAction(0, "Snooze 10m", receiverIntent(context, ACTION_SNOOZE, id));
 
         try {
             NotificationManagerCompat.from(context).notify(id, builder.build());

@@ -2,6 +2,7 @@ import { SocialLogin } from '@capgo/capacitor-social-login'
 import { Capacitor } from '@capacitor/core'
 import { CALENDAR_SCOPES, GOOGLE_WEB_CLIENT_ID, isGoogleAuthConfigured } from '../config/googleAuth'
 import { useTaskStore } from '../store/useTaskStore'
+import DeviceCalendar from '../plugins/DeviceCalendar'
 import { parseLocalDate, toLocalYMD, toLocalHM, startOfToday, addDays, dueDateTime } from './dates'
 
 const SESSION_KEY = 'google-cal-session'
@@ -164,7 +165,7 @@ async function calendarFetch(path, { method = 'GET', body } = {}, isRetry = fals
   return res.json()
 }
 
-// Timed tasks become one-hour events. Tasks with only a date, or no date at all (today), become all-day events.
+// Timed tasks become one-hour events and date-only tasks become all-day events (undated tasks are never pushed).
 // The other form is nulled so a PATCH can switch an event between timed and all-day.
 function eventTimes(task) {
   if (task.dueDate && task.dueTime) {
@@ -229,15 +230,71 @@ function parseEventStart(start) {
   return { dueDate: '', dueTime: '' }
 }
 
+/** True when upcoming events are read from the phone's own calendar instead of from Google. */
+export function readsPhoneCalendar() {
+  return Capacitor.isNativePlatform() && useTaskStore.getState().settings.phoneCalendarEnabled === true
+}
+
+async function googleUpcoming(windowEnd) {
+  const { settings } = useTaskStore.getState()
+  const items = await fetchUpcomingEvents(settings.googleCalendarId || 'primary', windowEnd)
+  const events = items
+    .filter((ev) => ev?.id && ev.status !== 'cancelled')
+    .filter((ev) => !ev.attendees?.some((a) => a.self && a.responseStatus === 'declined'))
+    .map((ev) => ({
+      id: ev.id,
+      taskId: ev.extendedProperties?.private?.todoTaskId,
+      title: ev.summary || 'Calendar event',
+      notes: ev.description || '',
+      ...parseEventStart(ev.start),
+    }))
+  // Only safe to infer deletions when the window wasn't truncated.
+  return { events, complete: items.length < IMPORT_MAX_EVENTS }
+}
+
+async function phoneUpcoming(now, windowEnd) {
+  const { settings } = useTaskStore.getState()
+  const hidden = new Set(settings.phoneCalendarHiddenIds || [])
+  const { events = [] } = await DeviceCalendar.getEvents({ from: now.getTime(), to: windowEnd.getTime() })
+  return {
+    complete: true,
+    events: events
+      .filter((ev) => !hidden.has(ev.calendarId))
+      .map((ev) => {
+        const start = new Date(ev.begin)
+        return {
+          id: phoneEventKey(ev, start),
+          title: ev.title || 'Calendar event',
+          notes: ev.description || '',
+          dueDate: ev.allDay ? ev.date : toLocalYMD(start),
+          dueTime: ev.allDay ? '' : toLocalHM(start),
+        }
+      }),
+  }
+}
+
+// Google events on the phone carry their Google id, and a repeat of a recurring event is named the way
+// Google names it. So a task pushed to Google is recognised when it comes back through the phone, and
+// tasks imported earlier from Google are kept rather than duplicated.
+function phoneEventKey(ev, start) {
+  if (!ev.syncId) return `phone:${ev.eventId}:${ev.begin}`
+  if (!ev.recurring) return ev.syncId
+  const stamp = start.toISOString().replace(/[-:]|\.\d+/g, '')
+  return `${ev.syncId}_${ev.allDay ? stamp.slice(0, 8) : stamp}`
+}
+
 /**
- * Mirror the next two weeks of Google Calendar into tasks so they get reminders.
+ * Mirror the next two weeks of the calendar into tasks so they get reminders. Events are read from the
+ * phone's calendar when that is switched on, otherwise from Google Calendar.
  * Imported tasks follow the calendar: changed events update them, deleted events remove them.
  * Tasks created in the app are never touched here.
  */
-export async function importUpcomingEvents(calendarId = 'primary') {
+export async function importUpcomingEvents() {
   const now = new Date()
   const windowEnd = addDays(now, IMPORT_WINDOW_DAYS)
-  const events = await fetchUpcomingEvents(calendarId, windowEnd)
+  const { events, complete } = readsPhoneCalendar()
+    ? await phoneUpcoming(now, windowEnd)
+    : await googleUpcoming(windowEnd)
 
   const store = useTaskStore.getState()
   const dismissed = new Set(store.dismissedEventIds)
@@ -245,25 +302,23 @@ export async function importUpcomingEvents(calendarId = 'primary') {
   const byEventId = new Map(store.tasks.filter((t) => t.googleEventId).map((t) => [t.googleEventId, t]))
   const inboxId = store.lists.find((l) => l.id === 'inbox')?.id || store.lists[0]?.id || 'inbox'
   const seen = new Set()
+  const today = startOfToday()
   const result = { imported: 0, updated: 0, removed: 0 }
 
   for (const ev of events) {
-    if (!ev?.id || ev.status === 'cancelled') continue
     seen.add(ev.id)
     if (dismissed.has(ev.id)) continue
-    if (ev.attendees?.some((a) => a.self && a.responseStatus === 'declined')) continue
-    if (taskIds.has(ev.extendedProperties?.private?.todoTaskId)) continue
+    // An event that began on an earlier day and is still running has nothing left to remind about.
+    if (parseLocalDate(ev.dueDate) < today) continue
+    if (taskIds.has(ev.taskId)) continue
 
-    const fromEvent = {
-      title: ev.summary || 'Calendar event',
-      ...parseEventStart(ev.start),
-    }
+    const fromEvent = { title: ev.title, dueDate: ev.dueDate, dueTime: ev.dueTime }
     const existing = byEventId.get(ev.id)
 
     if (!existing) {
       store.addTask({
         ...fromEvent,
-        notes: ev.description || '',
+        notes: ev.notes,
         priority: 'none',
         listId: inboxId,
         googleEventId: ev.id,
@@ -282,8 +337,7 @@ export async function importUpcomingEvents(calendarId = 'primary') {
     }
   }
 
-  // Only safe to infer deletions when the window wasn't truncated.
-  if (events.length < IMPORT_MAX_EVENTS) {
+  if (complete) {
     for (const task of useTaskStore.getState().tasks) {
       if (task.source !== 'calendar' || task.completed || seen.has(task.googleEventId)) continue
       const due = dueDateTime(task)
@@ -299,11 +353,10 @@ export async function importUpcomingEvents(calendarId = 'primary') {
 
 /** Background import on launch/resume. Returns true when tasks changed. */
 export async function autoImport() {
-  if (!calendarActive() || Date.now() - lastAutoImport < AUTO_IMPORT_INTERVAL_MS) return false
+  if (!(readsPhoneCalendar() || calendarActive()) || Date.now() - lastAutoImport < AUTO_IMPORT_INTERVAL_MS) return false
   lastAutoImport = Date.now()
   try {
-    const { settings } = useTaskStore.getState()
-    const r = await importUpcomingEvents(settings.googleCalendarId || 'primary')
+    const r = await importUpcomingEvents()
     return r.imported + r.updated + r.removed > 0
   } catch (e) {
     // Being offline at launch is normal; only an expired sign-in needs the user's attention.

@@ -24,7 +24,8 @@ import java.util.Locale;
 )
 public class SpeechCapturePlugin extends Plugin {
     private SpeechRecognizer recognizer;
-    private boolean settled;
+    // The listen() call waiting for a result. Only touched on the UI thread.
+    private PluginCall activeCall;
 
     @PluginMethod
     public void checkPermissions(PluginCall call) {
@@ -63,11 +64,10 @@ public class SpeechCapturePlugin extends Plugin {
     @PluginMethod
     public void stop(PluginCall call) {
         getActivity().runOnUiThread(() -> {
-            if (recognizer != null) {
-                recognizer.cancel();
-                recognizer.destroy();
-                recognizer = null;
-            }
+            if (recognizer != null) recognizer.cancel();
+            // Settle the pending listen() so the app isn't left waiting on it.
+            if (activeCall != null) finishReject(activeCall, "Listening was cancelled");
+            else destroyRecognizer();
             call.resolve();
         });
     }
@@ -78,10 +78,9 @@ public class SpeechCapturePlugin extends Plugin {
             return;
         }
         getActivity().runOnUiThread(() -> {
-            settled = false;
-            if (recognizer != null) {
-                recognizer.destroy();
-            }
+            if (activeCall != null) finishReject(activeCall, "Listening was cancelled");
+            destroyRecognizer();
+            activeCall = call;
             recognizer = SpeechRecognizer.createSpeechRecognizer(getContext());
             recognizer.setRecognitionListener(new RecognitionListener() {
                 @Override
@@ -132,16 +131,17 @@ public class SpeechCapturePlugin extends Plugin {
         });
     }
 
+    // Late callbacks from a recognizer that was already replaced carry an old call and are ignored.
     private void finishResolve(PluginCall call, JSObject data) {
-        if (settled) return;
-        settled = true;
+        if (call != activeCall) return;
+        activeCall = null;
         destroyRecognizer();
         call.resolve(data);
     }
 
     private void finishReject(PluginCall call, String message) {
-        if (settled) return;
-        settled = true;
+        if (call != activeCall) return;
+        activeCall = null;
         destroyRecognizer();
         call.reject(message);
     }

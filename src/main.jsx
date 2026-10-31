@@ -3,11 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {})
-  })
-}
+// The service worker is registered by vite-plugin-pwa (see vite.config.js).
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

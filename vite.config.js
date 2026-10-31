@@ -3,7 +3,10 @@ import react from '@vitejs/plugin-react'
 import legacy from '@vitejs/plugin-legacy'
 import { VitePWA } from 'vite-plugin-pwa'
 
-export default defineConfig({
+// `vite build --mode android` builds the copy bundled into the Android app. Its files load from the APK,
+// where a caching service worker can only serve an outdated build after an update, so that build ships a
+// worker that clears the old cache and unregisters itself.
+export default defineConfig(({ mode }) => ({
   build: {
     // Android emulator WebViews can be far behind desktop Chrome.
     target: 'es2018',
@@ -16,6 +19,7 @@ export default defineConfig({
     }),
     VitePWA({
       registerType: 'autoUpdate',
+      selfDestroying: mode === 'android',
       includeAssets: ['favicon.svg', 'icons/*.png'],
       manifest: {
         name: 'ToDo',
@@ -37,4 +41,4 @@ export default defineConfig({
       devOptions: { enabled: true },
     }),
   ],
-})
+}))
