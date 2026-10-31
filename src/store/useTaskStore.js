@@ -3,13 +3,13 @@ import { persist } from 'zustand/middleware'
 import { parseLocalDate, startOfToday, addDays, dueDateTime } from '../lib/dates'
 import { isReminder } from '../lib/taskKind'
 
-const DEFAULT_LISTS = [
+export const DEFAULT_LISTS = [
   { id: 'inbox', name: 'Inbox', color: '#4772FA' },
   { id: 'personal', name: 'Personal', color: '#FF6B6B' },
   { id: 'work', name: 'Work', color: '#4ECDC4' },
 ]
 
-const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS = {
   notificationStyle: 'sticky',
   notificationRepeatMinutes: 10,
   voiceRemindersEnabled: true,
@@ -50,7 +50,8 @@ export const useTaskStore = create(
       addTask: (task) => {
         const created = {
           ...task,
-          id: crypto.randomUUID(),
+          // Calendar imports pass a fixed id, so the same event imported on two devices is one task.
+          id: task.id || crypto.randomUUID(),
           createdAt: new Date().toISOString(),
           completed: false,
         }
@@ -96,7 +97,7 @@ export const useTaskStore = create(
       setCalendarError: (message) => set({ calendarError: message || '' }),
 
       addList: (name, color) => set((s) => ({
-        lists: [...s.lists, { id: crypto.randomUUID(), name, color }],
+        lists: [...s.lists, { id: crypto.randomUUID(), name, color, createdAt: new Date().toISOString() }],
       })),
 
       deleteList: (id) => set((s) => ({

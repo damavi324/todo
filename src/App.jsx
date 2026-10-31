@@ -9,6 +9,7 @@ import { useTaskStore } from './store/useTaskStore'
 import { syncReminders, applyNotificationCompletions } from './lib/notifications'
 import { autoImport } from './lib/googleCalendar'
 import { saveTask } from './lib/saveTask'
+import { startCloudSync } from './lib/cloudSync'
 import { dueDateTime, formatDue } from './lib/dates'
 import VoiceReminder from './plugins/VoiceReminder'
 import { LogsSheet } from './components/Calls'
@@ -83,6 +84,9 @@ export default function App() {
     setDraft(task)
     setAddOpen(true)
   }
+
+  // Follow the signed-in account so tasks match on every device.
+  useEffect(() => startCloudSync(), [])
 
   useEffect(() => {
     const run = () => refresh().catch(console.error)

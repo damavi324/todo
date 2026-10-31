@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core'
 import { CALENDAR_SCOPES, GOOGLE_WEB_CLIENT_ID, isGoogleAuthConfigured } from '../config/googleAuth'
 import { useTaskStore } from '../store/useTaskStore'
 import DeviceCalendar from '../plugins/DeviceCalendar'
+import { cloudSignIn, cloudSignOut } from './cloudSync'
 import { parseLocalDate, toLocalYMD, toLocalHM, startOfToday, addDays, dueDateTime } from './dates'
 
 const SESSION_KEY = 'google-cal-session'
@@ -73,7 +74,16 @@ export async function signIn() {
   const email = result?.profile?.email || ''
   saveSession({ accessToken, email, expiresAt: Date.now() + TOKEN_LIFETIME_MS })
   useTaskStore.getState().setCalendarError('')
-  return { email }
+
+  // The same Google account signs in to sync. Calendar still works if this part fails.
+  let syncError = ''
+  try {
+    await cloudSignIn({ idToken: result?.idToken, accessToken })
+  } catch (e) {
+    console.error(e)
+    syncError = `Signed in, but sync couldn't start: ${e?.message || e}`
+  }
+  return { email, syncError }
 }
 
 function extractAccessToken(value) {
@@ -89,6 +99,7 @@ export async function signOut() {
       await initGoogleAuth().catch(() => {})
       await SocialLogin.logout({ provider: 'google' }).catch(() => {})
     }
+    await cloudSignOut().catch(console.error)
   } finally {
     saveSession(null)
   }
@@ -296,7 +307,11 @@ export async function importUpcomingEvents() {
     ? await phoneUpcoming(now, windowEnd)
     : await googleUpcoming(windowEnd)
 
+  removeDuplicateImports(useTaskStore.getState())
   const store = useTaskStore.getState()
+  // Where these events came from. Each device only removes events from the source it reads, so a phone
+  // reading its own calendar and a browser reading Google don't delete each other's imports.
+  const origin = readsPhoneCalendar() ? 'phone' : 'google'
   const dismissed = new Set(store.dismissedEventIds)
   const taskIds = new Set(store.tasks.map((t) => t.id))
   const byEventId = new Map(store.tasks.filter((t) => t.googleEventId).map((t) => [t.googleEventId, t]))
@@ -318,11 +333,13 @@ export async function importUpcomingEvents() {
     if (!existing) {
       store.addTask({
         ...fromEvent,
+        id: importedTaskId(ev.id),
         notes: ev.notes,
         priority: 'none',
         listId: inboxId,
         googleEventId: ev.id,
         source: 'calendar',
+        calendarOrigin: origin,
       })
       result.imported += 1
     } else if (
@@ -340,6 +357,7 @@ export async function importUpcomingEvents() {
   if (complete) {
     for (const task of useTaskStore.getState().tasks) {
       if (task.source !== 'calendar' || task.completed || seen.has(task.googleEventId)) continue
+      if ((task.calendarOrigin || 'google') !== origin) continue
       const due = dueDateTime(task)
       if (due && due > now && due < windowEnd) {
         store.deleteTask(task.id)
@@ -349,6 +367,31 @@ export async function importUpcomingEvents() {
   }
 
   return result
+}
+
+/** The task id for an imported event: the same on every device, so syncing never doubles it. */
+function importedTaskId(eventId) {
+  return `cal-${String(eventId).replace(/\//g, '_')}`
+}
+
+/**
+ * Imports made before ids were fixed got random ids, so the same event imported on two devices shows up
+ * twice once they sync. Keep one task per event, preferring one already marked done.
+ */
+function removeDuplicateImports(store) {
+  const byEvent = new Map()
+  for (const task of store.tasks) {
+    if (task.source !== 'calendar' || !task.googleEventId) continue
+    const kept = byEvent.get(task.googleEventId)
+    if (!kept) {
+      byEvent.set(task.googleEventId, task)
+    } else if (task.completed && !kept.completed) {
+      store.deleteTask(kept.id)
+      byEvent.set(task.googleEventId, task)
+    } else {
+      store.deleteTask(task.id)
+    }
+  }
 }
 
 /** Background import on launch/resume. Returns true when tasks changed. */

@@ -15,11 +15,14 @@ import { requestVoiceReminderPermissions, syncReminders, spokenText, announce } 
 import { voiceOptions, PITCHES } from '../lib/voices'
 import VoiceReminder from '../plugins/VoiceReminder'
 import DeviceCalendar from '../plugins/DeviceCalendar'
+import { isCloudConfigured } from '../lib/firebase'
+import { useSyncStore } from '../lib/cloudSync'
 import { X, Calendar, Volume2, LogOut, LogIn, RefreshCw, Play, Check } from 'lucide-react'
 import CallingSettings from './CallingSettings'
 
 export default function Settings({ onClose }) {
   const { settings, updateSettings } = useTaskStore()
+  const sync = useSyncStore()
   const [gcalSignedIn, setGcalSignedIn] = useState(isSignedIn())
   const [accountEmail, setAccountEmail] = useState(getSignedInEmail())
   const [authError, setAuthError] = useState('')
@@ -126,10 +129,11 @@ export default function Settings({ onClose }) {
     setAuthError('')
     setBusy(true)
     try {
-      const { email } = await signIn()
+      const { email, syncError } = await signIn()
       updateSettings({ googleCalendarEnabled: true })
       setGcalSignedIn(true)
       setAccountEmail(email || getSignedInEmail())
+      if (syncError) setAuthError(syncError)
     } catch (e) {
       if (e?.code !== 'USER_CANCELLED') {
         setAuthError(e?.message || 'Sign-in failed')
@@ -164,6 +168,40 @@ export default function Settings({ onClose }) {
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {isCloudConfigured() && (
+          <Section title="Sync">
+            <div className="px-5 py-4 space-y-3">
+              {sync.status === 'signed-out' ? (
+                <>
+                  <p className="text-xs text-gray-500">
+                    Sign in with Google to keep your tasks, lists and settings the same on your phone and the web.
+                    Everything still works offline and catches up when you&apos;re back online.
+                  </p>
+                  {authError && (
+                    <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2.5">{authError}</p>
+                  )}
+                  <button
+                    onClick={handleSignIn}
+                    disabled={!authConfigured || busy}
+                    className="w-full bg-primary text-white text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40"
+                  >
+                    <LogIn size={16} />
+                    {busy ? 'Signing in…' : gcalSignedIn ? 'Turn on sync' : 'Sign in with Google'}
+                  </button>
+                </>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${SYNC_DOT[sync.status] || 'bg-gray-300'}`} />
+                  <div className="min-w-0">
+                    <p className="text-sm text-gray-700">{SYNC_LABEL[sync.status] || 'Sync'}</p>
+                    <p className="text-xs text-gray-400 truncate">{sync.error || sync.email}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Section>
+        )}
+
         <Section title="Calling">
           <CallingSettings />
         </Section>
@@ -434,6 +472,21 @@ export default function Settings({ onClose }) {
       </div>
     </div>
   )
+}
+
+const SYNC_LABEL = {
+  connecting: 'Connecting…',
+  synced: 'Synced',
+  pending: 'Saving changes…',
+  offline: 'Offline. Changes will sync when you reconnect.',
+  error: 'Sync problem',
+}
+const SYNC_DOT = {
+  synced: 'bg-green-500',
+  pending: 'bg-amber-400',
+  connecting: 'bg-amber-400',
+  offline: 'bg-gray-400',
+  error: 'bg-red-500',
 }
 
 function Section({ title, children }) {
