@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTaskStore } from '../store/useTaskStore'
-import { Calendar, CalendarDays, List, Plus, X, Settings, CheckSquare } from 'lucide-react'
+import { Calendar, CalendarDays, List, Plus, X, Settings, CheckSquare, Phone } from 'lucide-react'
+import { useCallStore, isBadStatus } from '../store/useCallStore'
 import { parseLocalDate, startOfToday, addDays } from '../lib/dates'
 import { isReminder } from '../lib/taskKind'
 
@@ -11,7 +12,10 @@ const SMART_LISTS = [
 ]
 
 export default function Sidebar({ onClose, onOpenSettings }) {
-  const { lists, selectedList, setSelectedList, addList, tasks: allTasks } = useTaskStore()
+  const { lists, selectedList, setSelectedList, addList, tasks: allTasks, appView, setAppView } = useTaskStore()
+  const callStatus = useCallStore((s) => s.status)
+  const callSession = useCallStore((s) => s.session)
+  const onCall = callSession && callStatus && callStatus !== 'ended' && !isBadStatus(callStatus)
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
 
@@ -50,13 +54,22 @@ export default function Sidebar({ onClose, onOpenSettings }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 pb-4">
+        <button
+          onClick={() => { setAppView('calls'); onClose?.() }}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-3 transition-colors ${appView === 'calls' ? 'bg-white/15' : 'hover:bg-white/8'}`}
+        >
+          <Phone size={18} className="text-emerald-400" />
+          <span className="flex-1 text-left text-sm">Calls</span>
+          {onCall && <span className="text-xs bg-red-500 rounded-full px-2 py-0.5">Live</span>}
+        </button>
+
         <p className="text-xs text-gray-500 uppercase tracking-wider px-2 mb-2">Smart Lists</p>
         {SMART_LISTS.map(({ id, name, icon: Icon, color }) => (
           <button
             key={id}
             onClick={() => select(id)}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-0.5 transition-colors ${
-              selectedList === id ? 'bg-white/15' : 'hover:bg-white/8'
+              appView === 'tasks' && selectedList === id ? 'bg-white/15' : 'hover:bg-white/8'
             }`}
           >
             <Icon size={18} style={{ color }} />
@@ -73,7 +86,7 @@ export default function Sidebar({ onClose, onOpenSettings }) {
             key={list.id}
             onClick={() => select(list.id)}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-0.5 transition-colors ${
-              selectedList === list.id ? 'bg-white/15' : 'hover:bg-white/8'
+              appView === 'tasks' && selectedList === list.id ? 'bg-white/15' : 'hover:bg-white/8'
             }`}
           >
             <span className="w-4 h-4 rounded-full flex-shrink-0" style={{ background: list.color }} />

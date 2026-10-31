@@ -8,11 +8,13 @@ import { Menu, Plus, X, Mic } from 'lucide-react'
 import { useTaskStore } from './store/useTaskStore'
 import { syncReminders, applyNotificationCompletions } from './lib/notifications'
 import { autoImport } from './lib/googleCalendar'
-import { parseSpokenTask, isGeminiConfigured } from './lib/voiceTask'
 import { saveTask } from './lib/saveTask'
 import { dueDateTime, formatDue } from './lib/dates'
 import VoiceReminder from './plugins/VoiceReminder'
-import SpeechCapture from './plugins/SpeechCapture'
+import { LogsSheet } from './components/Calls'
+import VoiceAssistant from './components/VoiceAssistant'
+import { useCallStore } from './store/useCallStore'
+import { normalizeServerUrl, wakeServer } from './lib/callpilot'
 
 // Bring the app in line with what happened while it was closed or in the background.
 async function refresh() {
@@ -26,36 +28,60 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [draft, setDraft] = useState(null)
-  const [listening, setListening] = useState(false)
-  const [voiceStatus, setVoiceStatus] = useState('')
+  const [voiceOpen, setVoiceOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const calendarError = useTaskStore((s) => s.calendarError)
   const setCalendarError = useTaskStore((s) => s.setCalendarError)
+  const appView = useTaskStore((s) => s.appView)
+  const setAppView = useTaskStore((s) => s.setAppView)
+  const callpilotUrl = useTaskStore((s) => s.settings.callpilotUrl)
+  const callpilotConnected = useTaskStore((s) => s.settings.callpilotConnected)
+  const notice = useCallStore((s) => s.notice)
+  const question = useCallStore((s) => s.question)
 
-  const handleVoiceCapture = async () => {
-    setVoiceStatus('')
-    setListening(true)
-    try {
-      await SpeechCapture.requestPermissions()
-      setVoiceStatus(isGeminiConfigured() ? 'Speak now. Gemini will fill in the task.' : 'Speak now.')
-      const { text } = await SpeechCapture.listen()
-      setVoiceStatus('Working out the task…')
-      const { parseWarning, ...parsed } = await parseSpokenTask(text)
-      // A clear task with a day and a time still ahead is saved straight away. Anything else is shown to check.
-      if (!parseWarning && parsed.dueDate && parsed.dueTime && dueDateTime(parsed) > new Date()) {
-        const task = await saveTask({ ...parsed, listId: 'inbox' })
-        setVoiceStatus(`Reminder set: ${task.title}, ${formatDue(task.dueDate, task.dueTime)}`)
+  // Calls is the live CallPilot page, which owns the phone line. Wake the server, but
+  // do not open a second line from this app.
+  useEffect(() => {
+    useCallStore.getState().disconnect()
+    if (callpilotConnected && callpilotUrl) wakeServer().catch(() => {})
+  }, [callpilotUrl, callpilotConnected])
+
+  useEffect(() => {
+    if (!callpilotConnected || !callpilotUrl) return
+    const onVisible = () => { if (document.visibilityState === 'visible') wakeServer().catch(() => {}) }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [callpilotUrl, callpilotConnected])
+
+  // Short-lived toast for call notices.
+  const [toast, setToast] = useState(null)
+  useEffect(() => {
+    if (!notice) return
+    setToast(notice)
+    const t = setTimeout(() => setToast(null), notice.level === 'error' ? 6000 : 3000)
+    return () => clearTimeout(t)
+  }, [notice])
+
+  // Pilot asked something while you're on another screen: bring Calls forward.
+  useEffect(() => {
+    if (question) setAppView('calls')
+  }, [question, setAppView])
+
+  // A clear spoken task with a day and a time still ahead is saved straight away. Anything else,
+  // anything with a call attached, or anything you asked to review is shown to check.
+  const handleVoiceTask = async (task, { review = false } = {}) => {
+    setVoiceOpen(false)
+    if (!review && !task.parseWarning && !task.call && task.dueDate && task.dueTime && dueDateTime(task) > new Date()) {
+      try {
+        const saved = await saveTask({ ...task, listId: task.listId || 'inbox' })
+        setToast({ level: 'info', message: `Reminder set: ${saved.title}, ${formatDue(saved.dueDate, saved.dueTime)}` })
         return
+      } catch (e) {
+        console.error(e)
       }
-      setDraft({ ...parsed, parseWarning })
-      setVoiceStatus('')
-      setAddOpen(true)
-    } catch (error) {
-      const message = error?.message || 'Could not hear a task'
-      if (!/cancel/i.test(message)) setVoiceStatus(message)
-    } finally {
-      setListening(false)
     }
+    setDraft(task)
+    setAddOpen(true)
   }
 
   useEffect(() => {
@@ -110,42 +136,41 @@ export default function App() {
           </div>
         )}
 
-        <TaskList />
+        {appView === 'calls'
+          ? <CallPilotPage url={callpilotUrl} connected={callpilotConnected} onOpenSettings={() => setSettingsOpen(true)} />
+          : <TaskList />}
 
-        {voiceStatus && !listening && (
-          <div className="fixed bottom-28 left-4 right-28 z-30 bg-white border border-gray-200 text-sm text-gray-700 rounded-2xl px-3 py-2 shadow">
-            {voiceStatus}
-          </div>
-        )}
         <button
           type="button"
-          onClick={handleVoiceCapture}
-          disabled={listening}
-          aria-label="Create a task by speaking"
-          className="fixed bottom-8 right-24 w-14 h-14 bg-white border border-gray-200 rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-transform z-30 disabled:opacity-60">
-          <Mic size={24} className={listening ? 'text-red-500' : 'text-primary'} />
+          onClick={() => setVoiceOpen(true)}
+          disabled={voiceOpen}
+          aria-label="Speak a task or a call"
+          className={`fixed bottom-8 ${appView === 'calls' ? 'right-6' : 'right-24'} w-14 h-14 bg-white border border-gray-200 rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-transform z-30 disabled:opacity-60`}>
+          <Mic size={24} className={voiceOpen ? 'text-red-500' : 'text-primary'} />
         </button>
-        <button
-          onClick={() => { setDraft(null); setAddOpen(true) }}
-          className="fixed bottom-8 right-6 w-14 h-14 bg-primary rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-transform z-30"
-          style={{ boxShadow: '0 4px 20px rgba(71,114,250,0.4)' }}>
-          <Plus size={26} className="text-white" />
-        </button>
+        {appView !== 'calls' && (
+          <button
+            onClick={() => { setDraft(null); setAddOpen(true) }}
+            aria-label="Add a task"
+            className="fixed bottom-8 right-6 w-14 h-14 bg-primary rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-transform z-30"
+            style={{ boxShadow: '0 4px 20px rgba(71,114,250,0.4)' }}>
+            <Plus size={26} className="text-white" />
+          </button>
+        )}
+
+        {toast && (
+          <div role="status" className={`fixed top-12 left-4 right-4 z-[70] rounded-2xl px-4 py-3 text-sm shadow-lg ${toast.level === 'error' ? 'bg-red-600 text-white' : 'bg-[#1a1d2e] text-white'}`}>
+            {toast.message}
+          </div>
+        )}
       </div>
 
-      {listening && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-end">
-          <div className="w-full bg-white rounded-t-3xl px-6 pt-6 pb-10">
-            <p className="text-lg font-semibold text-gray-800">Listening…</p>
-            <p className="text-sm text-gray-500 mt-1">{voiceStatus || 'Say the task, including the day and time.'}</p>
-            <button
-              type="button"
-              onClick={() => { SpeechCapture.stop().catch(() => {}); setListening(false) }}
-              className="mt-5 w-full bg-gray-100 text-gray-800 font-medium py-3 rounded-2xl">
-              Cancel
-            </button>
-          </div>
-        </div>
+      {voiceOpen && (
+        <VoiceAssistant
+          onClose={() => setVoiceOpen(false)}
+          onTask={handleVoiceTask}
+          onCall={(draft) => { setVoiceOpen(false); useCallStore.getState().setDraft(draft); setAppView('calls') }}
+        />
       )}
 
       {addOpen && (
@@ -155,6 +180,28 @@ export default function App() {
         />
       )}
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
+      <LogsSheet />
     </div>
+  )
+}
+
+/** Calls opens the CallPilot site itself, so that page updates without a new app install. */
+function CallPilotPage({ url, connected, onOpenSettings }) {
+  const src = normalizeServerUrl(url)
+  if (!connected || !src) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-3">
+        <p className="text-sm text-gray-600">Add your CallPilot address in Settings. Calls opens that page.</p>
+        <button type="button" onClick={onOpenSettings} className="bg-primary text-white text-sm font-medium px-4 py-2.5 rounded-xl">Open settings</button>
+      </div>
+    )
+  }
+  return (
+    <iframe
+      title="Calls"
+      src={src}
+      className="flex-1 w-full min-h-0 border-0 bg-white"
+      allow="microphone *; autoplay; speaker-selection"
+    />
   )
 }

@@ -1,0 +1,73 @@
+# Builds the debug APK on GitHub's servers (they have the Android SDK) and saves it
+# to the "apk-builds" branch as todo-debug.apk, so it can be downloaded or attached.
+name: Build APK
+on:
+  push:
+    branches: [main, feature/calling-ai-voice]
+    paths-ignore: ['**.md', 'server/**', 'render.yaml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0 platform-tools'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install and build the web app
+        run: |
+          npm ci || npm install
+          npm run build
+          npx cap sync android
+      - name: Build the APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          # gradle.properties points at a JDK on the Windows PC; use the runner's JDK 21 here.
+          sed -i '/^org.gradle.java.home/d' gradle.properties
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log
+      - name: Save the APK to the apk-builds branch
+        run: |
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          SHA=$(git rev-parse --short HEAD)
+          BRANCH="${GITHUB_REF_NAME}"
+          mkdir -p /tmp/out && cp "$APK" /tmp/out/todo-debug.apk
+          cd /tmp/out
+          echo "Built from ${BRANCH} @ ${SHA} on $(date -u +%Y-%m-%dT%H:%MZ)" > BUILD.txt
+          git init -q -b apk-builds
+          git config user.name "apk-builder"
+          git config user.email "apk-builder@users.noreply.github.com"
+          git add todo-debug.apk BUILD.txt
+          git commit -q -m "APK from ${BRANCH} @ ${SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" apk-builds
+      - name: On failure, save the build log to the apk-builds branch
+        if: failure()
+        run: |
+          mkdir -p /tmp/fail && cd /tmp/fail
+          (echo "FAILED: ${GITHUB_REF_NAME} @ $(git -C $GITHUB_WORKSPACE rev-parse --short HEAD)"; tail -n 300 /tmp/gradle.log 2>/dev/null) > BUILD-FAILED.log
+          git init -q -b apk-builds
+          git config user.name "apk-builder"
+          git config user.email "apk-builder@users.noreply.github.com"
+          git add BUILD-FAILED.log && git commit -q -m "Build failed"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" apk-builds
+      - uses: actions/upload-artifact@v4
+        with:
+          name: todo-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14

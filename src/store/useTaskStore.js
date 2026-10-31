@@ -17,11 +17,21 @@ const DEFAULT_SETTINGS = {
   // Empty means the phone's best voice for its language.
   voiceName: '',
   voicePitch: 1,
+  // Standing facts Pilot may use on every call. The note on a single call stays on that call.
+  callerName: '',
+  callerAbout: '',
   googleCalendarEnabled: false,
   googleCalendarId: 'primary',
   // Android only: read upcoming events from the phone's calendar instead of from Google.
   phoneCalendarEnabled: false,
   phoneCalendarHiddenIds: [],
+  // Calling server (CallPilot)
+  callpilotUrl: '',
+  callpilotToken: '',
+  callpilotConnected: false,
+  callpilotOwner: '',
+  callpilotAssistant: 'Pilot',
+  callpilotProblems: [],
 }
 
 export const useTaskStore = create(
@@ -30,6 +40,8 @@ export const useTaskStore = create(
       tasks: [],
       lists: DEFAULT_LISTS,
       selectedList: 'today',
+      // Which screen is showing: the task lists or Calls.
+      appView: 'tasks',
       settings: DEFAULT_SETTINGS,
       // Calendar events the user removed from the app; never re-imported.
       dismissedEventIds: [],
@@ -93,7 +105,9 @@ export const useTaskStore = create(
         selectedList: s.selectedList === id ? 'inbox' : s.selectedList,
       })),
 
-      setSelectedList: (id) => set({ selectedList: id }),
+      setSelectedList: (id) => set({ selectedList: id, appView: 'tasks' }),
+
+      setAppView: (view) => set({ appView: view }),
 
       updateSettings: (changes) => set((s) => ({
         settings: { ...s.settings, ...changes },

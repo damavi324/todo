@@ -16,6 +16,7 @@ import { voiceOptions, PITCHES } from '../lib/voices'
 import VoiceReminder from '../plugins/VoiceReminder'
 import DeviceCalendar from '../plugins/DeviceCalendar'
 import { X, Calendar, Volume2, LogOut, LogIn, RefreshCw, Play, Check } from 'lucide-react'
+import CallingSettings from './CallingSettings'
 
 export default function Settings({ onClose }) {
   const { settings, updateSettings } = useTaskStore()
@@ -163,6 +164,10 @@ export default function Settings({ onClose }) {
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        <Section title="Calling">
+          <CallingSettings />
+        </Section>
+
         <Section title="Notifications">
           <Row label="Voice reminders">
             <button

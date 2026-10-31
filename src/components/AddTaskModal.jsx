@@ -3,7 +3,8 @@ import { useTaskStore } from '../store/useTaskStore'
 import { saveTask } from '../lib/saveTask'
 import { dueDateTime } from '../lib/dates'
 import { isReminder } from '../lib/taskKind'
-import { X, Flag, Calendar, Clock, AlignLeft, List } from 'lucide-react'
+import { X, Flag, Calendar, Clock, AlignLeft, List, Phone } from 'lucide-react'
+import { formatNumber, assistantName } from '../lib/callpilot'
 
 const KINDS = [
   { value: 'task', label: 'Task', hint: 'Keeps reminding you until you mark it done.' },
@@ -27,7 +28,14 @@ export default function AddTaskModal({ onClose, editTask, draft }) {
   const [dueDate, setDueDate] = useState(seed.dueDate || '')
   const [dueTime, setDueTime] = useState(seed.dueTime || '')
   const [priority, setPriority] = useState(seed.priority || 'none')
-  const [listId, setListId] = useState(editTask?.listId || 'inbox')
+  const { selectedList } = useTaskStore()
+  const smartLists = ['today', 'scheduled', 'all']
+  const [listId, setListId] = useState(
+    editTask?.listId || (draft?.listId && lists.some((l) => l.id === draft.listId) ? draft.listId : null)
+      || (!smartLists.includes(selectedList) && lists.some((l) => l.id === selectedList) ? selectedList : 'inbox')
+  )
+  // A phone call Pilot should make for this task (from the voice assistant).
+  const [call, setCall] = useState(seed.call || null)
   const [kind, setKind] = useState(isReminder(editTask) ? 'reminder' : 'task')
   const [saving, setSaving] = useState(false)
   // Guards against a second Enter press creating the task twice before the first save finishes.
@@ -44,7 +52,9 @@ export default function AddTaskModal({ onClose, editTask, draft }) {
     setSaving(true)
 
     // The time field is hidden without a date, so don't keep a leftover time behind it.
-    const taskData = { title: title.trim(), notes, dueDate, dueTime: dueDate ? dueTime : '', priority, listId, kind }
+    const taskData = {
+      title: title.trim(), notes, dueDate, dueTime: dueDate ? dueTime : '', priority, listId, kind, call: call || null,
+    }
 
     try {
       await saveTask(taskData, editTask)
@@ -154,6 +164,17 @@ export default function AddTaskModal({ onClose, editTask, draft }) {
               ))}
             </div>
           </div>
+
+          {call && (
+            <div className="flex items-start gap-3 rounded-xl bg-emerald-50 px-3 py-2.5">
+              <Phone size={16} className="text-emerald-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0 text-sm">
+                <p className="font-medium text-emerald-900">{assistantName()} call attached</p>
+                <p className="text-emerald-800/80 truncate">{call.contact || formatNumber(call.to) || 'Number to add'}{call.goal ? ` · ${call.goal}` : ''}</p>
+              </div>
+              <button type="button" onClick={() => setCall(null)} aria-label="Remove the call" className="text-emerald-700 p-1"><X size={14} /></button>
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             <List size={16} className="text-gray-400 flex-shrink-0" />

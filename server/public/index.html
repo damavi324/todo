@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1C2740" />
+  <title>CallPilot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Login -->
+  <div id="login" class="overlay" hidden>
+    <form id="loginForm" class="login-card">
+      <h1 class="brand">CallPilot</h1>
+      <p class="muted">Enter your passcode to open the dialer.</p>
+      <input id="passcode" type="password" autocomplete="current-password" placeholder="Passcode" required />
+      <button class="btn primary" type="submit">Open dialer</button>
+      <p id="loginError" class="error" hidden></p>
+    </form>
+  </div>
+
+  <header class="topbar">
+    <span class="brand">CallPilot</span>
+    <div class="topbar-right">
+      <span id="deviceState" class="device-state" data-state="off">Phone line connecting…</span>
+      <button id="logsBtn" class="logs-btn" type="button" aria-expanded="false" aria-controls="logs">Logs<span id="logsBadge" class="badge" hidden></span></button>
+    </div>
+  </header>
+
+  <div id="setup" class="setup" hidden>
+    <strong>Finish setup before calling</strong>
+    <ul id="setupList"></ul>
+  </div>
+
+  <main class="layout">
+    <!-- Left: compose or control -->
+    <section class="panel" id="leftPanel">
+      <!-- New call -->
+      <form id="newCall" class="new-call">
+        <div class="mode" role="radiogroup" aria-label="Who talks">
+          <label class="mode-opt">
+            <input type="radio" name="mode" value="copilot" checked />
+            <span><b>I'll talk</b><small>AI listens and coaches me</small></span>
+          </label>
+          <label class="mode-opt">
+            <input type="radio" name="mode" value="agent" />
+            <span><b>AI makes the call</b><small>I can jump in anytime</small></span>
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Phone number</span>
+          <input id="to" type="tel" inputmode="tel" autocomplete="tel" placeholder="(214) 555-0123" required />
+        </label>
+
+        <div class="field">
+          <div class="field-head">
+            <label for="goal" id="goalLabel">What's the call for? <em>optional</em></label>
+            <button type="button" class="mic" data-target="goal" aria-pressed="false" aria-label="Speak the goal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-3.5 0h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Speak</span></button>
+          </div>
+          <textarea id="goal" rows="2" class="grow" placeholder="Move my cleaning to a weekday morning next week"></textarea>
+        </div>
+
+        <div class="field">
+          <div class="field-head">
+            <label for="brief">Details the AI can use</label>
+            <button type="button" class="mic" data-target="brief" aria-pressed="false" aria-label="Speak the details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-3.5 0h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Speak</span></button>
+          </div>
+          <textarea id="brief" rows="5" class="grow" placeholder="Talk or type as much as you like: who you are, account info, times that work, what's OK to agree to, what to avoid."></textarea>
+          <small id="briefCount" class="count"></small>
+        </div>
+
+        <button id="callBtn" class="btn call" type="submit" disabled>Call</button>
+        <p id="formError" class="error" hidden></p>
+      </form>
+
+
+      <!-- Call plan review -->
+      <div id="planView" class="plan" hidden>
+        <p class="plan-kicker">Call plan for <span id="planNumber"></span></p>
+        <h2 id="planObjective"></h2>
+        <div class="plan-open">
+          <p class="plan-label">Pilot opens with</p>
+          <p id="planOpening"></p>
+        </div>
+        <div id="planBody"></div>
+        <div id="planMissing" class="plan-missing" hidden></div>
+        <p class="muted small">Pilot uses this as a guide and adapts to whatever they say. Anything outside it, it asks you first.</p>
+        <div class="plan-actions">
+          <button id="planCall" class="btn call" type="button">Call now</button>
+          <button id="planEdit" class="btn ghost" type="button">Edit details</button>
+        </div>
+      </div>
+
+      <!-- Active call -->
+      <div id="activeCall" class="active" hidden>
+        <div class="live-bar" data-status="starting">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="statusText">Starting</span>
+          <span id="timer" class="timer">0:00</span>
+        </div>
+        <div class="who">
+          <span id="activeNumber" class="number"></span>
+          <span id="activeGoal" class="goal"></span>
+        </div>
+        <p id="agentState" class="agent-state" hidden></p>
+
+        <div class="controls" id="youControls">
+          <button id="muteBtn" class="btn ghost" type="button" aria-pressed="false">Mute</button>
+          <button id="keypadBtn" class="btn ghost" type="button" aria-expanded="false">Keypad</button>
+          <button id="hangupBtn" class="btn end" type="button">Hang up</button>
+        </div>
+        <div class="controls" id="agentControls" hidden>
+          <button id="joinBtn" class="btn primary" type="button">Join the call</button>
+          <button id="agentHangupBtn" class="btn end" type="button">End call</button>
+        </div>
+
+        <div id="keypad" class="keypad" hidden>
+          <button type="button">1</button><button type="button">2</button><button type="button">3</button>
+          <button type="button">4</button><button type="button">5</button><button type="button">6</button>
+          <button type="button">7</button><button type="button">8</button><button type="button">9</button>
+          <button type="button">*</button><button type="button">0</button><button type="button">#</button>
+        </div>
+
+        <form id="question" class="question" hidden>
+          <p class="q-label">The agent is asking you</p>
+          <p id="questionText" class="q-text"></p>
+          <input id="answer" type="text" placeholder="Type your answer" autocomplete="off" />
+          <div class="q-actions">
+            <button class="btn primary" type="submit">Send answer</button>
+            <button class="btn ghost" type="button" data-quick="Yes, that works.">Yes</button>
+            <button class="btn ghost" type="button" data-quick="No. Say I'll follow up.">No</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Summary -->
+      <div id="summary" class="summary" hidden>
+        <p id="summaryOutcome" class="outcome"></p>
+        <h2 id="summaryHeadline"></h2>
+        <p id="summaryBody"></p>
+        <div id="summaryFacts"></div>
+        <div id="summaryActions"></div>
+        <button id="newCallBtn" class="btn primary" type="button">New call</button>
+      </div>
+
+
+      <!-- One past call -->
+      <div id="callDetail" class="detail" hidden>
+        <button id="detailBack" class="link-btn" type="button">‹ All calls</button>
+        <p id="detailMeta" class="plan-kicker"></p>
+        <h2 id="detailTitle"></h2>
+        <p id="detailError" class="detail-error" hidden></p>
+        <div id="detailBody"></div>
+        <div class="plan-actions">
+          <button id="detailRedial" class="btn call" type="button">Redial with same info</button>
+          <button id="detailEdit" class="btn ghost" type="button">Edit, then call</button>
+        </div>
+        <section class="plan-sec">
+          <h4>What happened</h4>
+          <ol id="detailLog" class="call-log"></ol>
+        </section>
+      </div>
+
+      <section class="history">
+        <h3>Recent calls <small class="muted">tap one to see details or redial</small></h3>
+        <ol id="historyList"><li class="muted">No calls yet.</li></ol>
+      </section>
+    </section>
+
+    <!-- Right: live conversation -->
+    <section class="panel convo">
+      <div id="suggestion" class="suggestion" hidden>
+        <p class="s-label">Say next</p>
+        <ul id="suggestionSay"></ul>
+        <p id="suggestionNote" class="s-note"></p>
+      </div>
+      <div id="transcript" class="transcript" aria-live="polite">
+        <p class="empty">The conversation shows up here as it happens.</p>
+      </div>
+      <div class="partials">
+        <p id="partial-them" class="partial them"></p>
+        <p id="partial-you" class="partial you"></p>
+      </div>
+    </section>
+  </main>
+
+
+  <aside id="logs" class="logs" hidden aria-label="Server logs">
+    <div class="logs-head">
+      <strong>Logs</strong>
+      <label class="logs-filter"><input id="logsErrorsOnly" type="checkbox" /> Problems only</label>
+      <button id="logsCopy" class="btn ghost small-btn" type="button">Copy</button>
+      <button id="logsClose" class="btn ghost small-btn" type="button">Close</button>
+    </div>
+    <ol id="logsList" class="logs-list"></ol>
+  </aside>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="/vendor/twilio.min.js"></script>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
