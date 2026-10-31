@@ -39,6 +39,8 @@ export const useTaskStore = create(
     (set, get) => ({
       tasks: [],
       lists: DEFAULT_LISTS,
+      // People and places the assistant calls: { id, name, phone, notes, createdAt }.
+      contacts: [],
       selectedList: 'today',
       // Which screen is showing: the task lists or Calls.
       appView: 'tasks',
@@ -106,6 +108,18 @@ export const useTaskStore = create(
         selectedList: s.selectedList === id ? 'inbox' : s.selectedList,
       })),
 
+      addContact: (contact) => {
+        const created = { notes: '', ...contact, id: crypto.randomUUID(), createdAt: new Date().toISOString() }
+        set((s) => ({ contacts: [...s.contacts, created] }))
+        return created
+      },
+
+      updateContact: (id, changes) => set((s) => ({
+        contacts: s.contacts.map((c) => (c.id === id ? { ...c, ...changes } : c)),
+      })),
+
+      removeContact: (id) => set((s) => ({ contacts: s.contacts.filter((c) => c.id !== id) })),
+
       setSelectedList: (id) => set({ selectedList: id, appView: 'tasks' }),
 
       setAppView: (view) => set({ appView: view }),
@@ -142,6 +156,7 @@ export const useTaskStore = create(
       partialize: (s) => ({
         tasks: s.tasks,
         lists: s.lists,
+        contacts: s.contacts,
         selectedList: s.selectedList,
         settings: s.settings,
         dismissedEventIds: s.dismissedEventIds,

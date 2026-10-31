@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import { cp, socketUrl, isCallPilotReady, assistantName, wakeServer, callerContext } from '../lib/callpilot'
 import { archiveCall, archivedCall, mergeHistory, hasFinal, archivedList } from '../lib/callArchive'
 import CallSession from '../plugins/CallSession'
+import { contactFor } from '../lib/callFollowUps'
 
 const BAD = new Set(['failed', 'busy', 'no-answer', 'canceled'])
 const LIVE_TEXT = { starting: 'Starting', dialing: 'Dialing', queued: 'Dialing', initiated: 'Dialing', ringing: 'Ringing', live: 'Live', ended: 'Call ended', busy: 'Line busy', 'no-answer': 'No answer', failed: 'Call failed', canceled: 'Canceled' }
@@ -16,6 +17,14 @@ let reconnectTimer = null
 let device = null
 let devicePromise = null
 let historyTimer = null
+
+/** A saved contact's name and notes ride along as background, so the assistant knows who it's calling. */
+function withContact(body) {
+  const contact = contactFor(body.to)
+  if (!contact || String(body.brief || '').includes(contact.name)) return body
+  const lines = [`Calling: ${contact.name}`, contact.notes && `About ${contact.name}: ${contact.notes}`, body.brief]
+  return { ...body, brief: lines.filter(Boolean).join('\n') }
+}
 
 const initial = {
   connected: false, // live socket up
@@ -35,6 +44,7 @@ const initial = {
   joinPending: false,
   pending: null, // { mode, to, goal, brief, plan } awaiting "Call now"
   draft: null, // prefill for the compose form
+  draftVersion: 0, // bumps with each new draft so the form starts over from it
   detail: null,
   history: archivedList(), // phone copy first, so history shows instantly (even offline)
   serverState: 'unknown', // unknown | waking | up | down
@@ -241,7 +251,7 @@ export const useCallStore = create((set, get) => ({
 
   // ---------- starting and controlling calls ----------
   setDraft(draft) {
-    set({ draft, view: 'compose' })
+    set({ draft, view: 'compose', draftVersion: get().draftVersion + 1 })
   },
 
   async ensureAwake() {
@@ -251,6 +261,7 @@ export const useCallStore = create((set, get) => ({
   },
 
   async makePlan(body) {
+    body = withContact(body)
     await get().ensureAwake()
     const { plan } = await cp('/api/plan', { ...callerContext(), ...body }, { timeoutMs: 90000 })
     set({ pending: { ...body, plan }, view: 'plan' })
@@ -260,13 +271,10 @@ export const useCallStore = create((set, get) => ({
   async startCall(body) {
     const fresh = { lines: [], partials: { you: '', them: '' }, suggestion: null, question: null, agentState: null, summary: null, startedAt: null, muted: false, onAudio: false, detail: null }
     let session
+    body = withContact(body)
     await get().ensureAwake()
     if (body.mode === 'copilot') await get().ensurePhone()
-    try {
-      ;({ session } = await cp('/api/sessions', { ...callerContext(), ...body }))
-    } catch (err) {
-      throw err
-    }
+    ;({ session } = await cp('/api/sessions', { ...callerContext(), ...body }))
     set({ ...fresh, session, status: session.status, view: 'active', pending: null })
     get().refreshHistorySoon()
     try {
@@ -384,7 +392,7 @@ export const useCallStore = create((set, get) => ({
     } catch { /* offline; keep the old list */ }
   },
   async openDetail(id) {
-    let call = null
+    let call
     try {
       ;({ call } = await cp(`/api/sessions/${id}`))
     } catch (err) {

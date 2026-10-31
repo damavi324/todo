@@ -4,6 +4,8 @@ import { collection, deleteDoc, doc, onSnapshot, setDoc, writeBatch } from 'fire
 import { cloud, isCloudConfigured } from './firebase'
 import { useTaskStore, DEFAULT_LISTS, DEFAULT_SETTINGS } from '../store/useTaskStore'
 import { syncReminders } from './notifications'
+import { archiveCall, archivedCall, archivedList, forgetCall, onCallArchived, mergeHistory } from './callArchive'
+import { useCallStore } from '../store/useCallStore'
 
 /**
  * Keeps tasks, lists and shared settings the same on every device signed in to the same Google account.
@@ -179,6 +181,49 @@ function mirrorProfile(db, uid, { mayUpload }) {
   return () => { stopCloud(); stopLocal() }
 }
 
+/**
+ * Finished calls (transcript, notes, plan) go to users/{uid}/calls, so a call made from the phone shows up
+ * on the web and the other way round. The call server forgets calls when it sleeps; this copy doesn't.
+ */
+function mirrorCalls(db, uid, { mayUpload }) {
+  const ref = collection(db, 'users', uid, 'calls')
+  // Firestore documents top out at 1 MB, so keep the end of very long calls.
+  const trimmed = (call) => plain({
+    ...call,
+    transcript: (call.transcript || []).slice(-400),
+    log: (call.log || []).slice(-150),
+    suggestions: (call.suggestions || []).slice(-5),
+  })
+  const upload = (call) => setDoc(doc(ref, call.id), trimmed(call)).catch(reportError)
+  let first = true
+
+  const stopCloud = onSnapshot(ref, (snap) => {
+    if (first && snap.metadata.fromCache) return
+    const cloudIds = new Set(snap.docs.map((d) => d.id))
+    let changed = false
+    for (const change of snap.docChanges()) {
+      if (change.type === 'removed') continue
+      const call = { ...change.doc.data(), id: change.doc.id }
+      const local = archivedCall(call.id)
+      // Keep whichever copy is further along (the notes arrive a few seconds after hang-up).
+      if (!local || (!local.summary && call.summary)) changed = archiveCall(call, { quiet: true }) || changed
+    }
+    if (first) {
+      first = false
+      if (mayUpload) {
+        for (const item of archivedList()) {
+          const call = !cloudIds.has(item.id) && archivedCall(item.id)
+          if (call) upload(call)
+        }
+      }
+    }
+    if (changed) useCallStore.setState((s) => ({ history: mergeHistory(s.serverHistory || []) }))
+  }, reportError)
+
+  const stopLocal = onCallArchived((call) => upload(call))
+  return () => { stopCloud(); stopLocal() }
+}
+
 function updateStatus(metadata) {
   const { status, email } = useSyncStore.getState()
   if (status === 'error') return
@@ -194,6 +239,8 @@ const listOrder = (items) => items.sort((a, b) =>
   a.name.localeCompare(b.name)
 )
 
+const byName = (items) => items.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+
 let stopSync = null
 
 function begin(user) {
@@ -205,7 +252,9 @@ function begin(user) {
     // A different account: start from its data, not the previous account's, including its name and
     // calling setup.
     const { settings } = useTaskStore.getState()
-    applyRemote({ tasks: [], lists: [], dismissedEventIds: [], settings: { ...settings, ...pickShared(DEFAULT_SETTINGS) } })
+    for (const item of archivedList()) forgetCall(item.id)
+    useCallStore.setState({ history: [], serverHistory: [] })
+    applyRemote({ tasks: [], lists: [], contacts: [], dismissedEventIds: [], settings: { ...settings, ...pickShared(DEFAULT_SETTINGS) } })
   }
   try { localStorage.setItem(LAST_UID_KEY, user.uid) } catch { /* ignore */ }
   setStatus('connecting', { email: user.email || '' })
@@ -213,7 +262,9 @@ function begin(user) {
   const stops = [
     mirrorCollection(db, user.uid, 'tasks', { select: (s) => s.tasks, order: byNewest, mayUpload }),
     mirrorCollection(db, user.uid, 'lists', { select: (s) => s.lists, order: listOrder, mayUpload, starter: DEFAULT_LISTS }),
+    mirrorCollection(db, user.uid, 'contacts', { select: (s) => s.contacts, order: byName, mayUpload }),
     mirrorProfile(db, user.uid, { mayUpload }),
+    mirrorCalls(db, user.uid, { mayUpload }),
   ]
   stopSync = () => { stops.forEach((stop) => stop()); stopSync = null }
 }

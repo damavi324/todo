@@ -113,8 +113,9 @@ export default function VoiceAssistant({ onClose, onTask, onCall }) {
   }
 
   useEffect(() => {
-    begin()
-    return () => { rec.current?.cancel(); SpeechCapture.stop?.().catch(() => {}) }
+    // Start listening once the panel is on screen.
+    const frame = requestAnimationFrame(() => begin())
+    return () => { cancelAnimationFrame(frame); rec.current?.cancel(); SpeechCapture.stop?.().catch(() => {}) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

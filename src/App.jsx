@@ -5,7 +5,7 @@ import Sidebar, { Navigation } from './components/Sidebar'
 import TaskList from './components/TaskList'
 import TaskEditor from './components/TaskEditor'
 import Settings from './components/Settings'
-import { LogsSheet } from './components/Calls'
+import Calls, { LogsSheet } from './components/Calls'
 import VoiceAssistant from './components/VoiceAssistant'
 import { IconButton } from './components/ui'
 import { useTaskStore } from './store/useTaskStore'
@@ -15,7 +15,6 @@ import { autoImport } from './lib/googleCalendar'
 import { saveTask } from './lib/saveTask'
 import { startCloudSync } from './lib/cloudSync'
 import { dueDateTime, formatDue } from './lib/dates'
-import { normalizeServerUrl, wakeServer } from './lib/callpilot'
 import VoiceReminder from './plugins/VoiceReminder'
 
 // Bring the app in line with what happened while it was closed or in the background.
@@ -41,16 +40,17 @@ export default function App() {
   const callpilotConnected = useTaskStore((s) => s.settings.callpilotConnected)
   const question = useCallStore((s) => s.question)
 
-  // Calls is the live CallPilot page, which owns the phone line. Wake the server, but
-  // do not open a second line from this app.
+  // Stay connected to the calling server (waking it if it sleeps), so the assistant's questions and
+  // live calls reach you on any screen.
   useEffect(() => {
-    useCallStore.getState().disconnect()
-    if (callpilotConnected && callpilotUrl) wakeServer().catch(() => {})
+    const calls = useCallStore.getState()
+    if (callpilotConnected && callpilotUrl) calls.connect()
+    else calls.disconnect()
   }, [callpilotUrl, callpilotConnected])
 
   useEffect(() => {
     if (!callpilotConnected || !callpilotUrl) return
-    const onVisible = () => { if (document.visibilityState === 'visible') wakeServer().catch(() => {}) }
+    const onVisible = () => { if (document.visibilityState === 'visible') useCallStore.getState().wake().catch(() => {}) }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [callpilotUrl, callpilotConnected])
@@ -123,7 +123,7 @@ export default function App() {
         {browsing && !showCalls ? (
           <BrowseLists onPick={() => setBrowsing(false)} onOpenSettings={() => setSettingsOpen(true)} />
         ) : showCalls ? (
-          <CallPilotPage url={callpilotUrl} connected={callpilotConnected} onOpenSettings={() => setSettingsOpen(true)} />
+          <Calls onOpenSettings={() => setSettingsOpen(true)} />
         ) : (
           <TaskList
             onOpenTask={openTask}
@@ -232,34 +232,5 @@ function BrowseLists({ onPick, onOpenSettings }) {
         <Navigation onPick={onPick} large />
       </div>
     </div>
-  )
-}
-
-/** Calls opens the CallPilot site itself, so that page updates without a new app install. */
-function CallPilotPage({ url, connected, onOpenSettings }) {
-  const src = normalizeServerUrl(url)
-  if (!connected || !src) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center px-8 text-center">
-        <span className="w-12 h-12 rounded-2xl bg-accent/10 text-accent flex items-center justify-center mb-4">
-          <Phone size={22} />
-        </span>
-        <h2 className="text-lg font-semibold">Let your assistant make calls</h2>
-        <p className="text-sm text-ink-3 mt-1.5 max-w-sm">
-          Connect your calling server in Settings to book appointments, wait on hold and handle calls for you.
-        </p>
-        <button type="button" onClick={onOpenSettings} className="mt-5 h-10 px-4 rounded-lg bg-accent text-accent-ink text-sm font-medium">
-          Set up calling
-        </button>
-      </div>
-    )
-  }
-  return (
-    <iframe
-      title="Calls"
-      src={src}
-      className="flex-1 w-full min-h-0 border-0 bg-surface"
-      allow="microphone *; autoplay; speaker-selection"
-    />
   )
 }

@@ -77,13 +77,16 @@ export function slog(s, level, text) {
   persist(s);
 }
 
-export function createSession({ mode, to, goal, brief, plan, owner, about }) {
+export function createSession({ mode, to, goal, brief, plan, owner, about, localNow }) {
   const s = {
     id: crypto.randomUUID(),
     mode, // 'copilot' | 'agent'
     to,
     ownerName: String(owner || '').trim().slice(0, 80) || config.ownerName,
     about: String(about || '').trim().slice(0, 8000),
+    // The owner's own date and time, e.g. "Friday 2026-10-30 18:05 America/Chicago", so "next Tuesday"
+    // in the call can be written down as a real date.
+    localNow: String(localNow || '').trim().slice(0, 80),
     goal: (goal || '').trim(),
     brief: (brief || '').trim(),
     plan: plan || null,
@@ -285,6 +288,26 @@ export function finalize(s, reason = 'ended') {
   setTimeout(() => summarize(s), 1500);
 }
 
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Keeps the notes to one shape. action_items may come back as plain strings or as {title, date}. */
+export function normalizeSummary(n) {
+  if (!n || typeof n !== 'object') return null;
+  const text = (v, max = 300) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  const dated = (x) => ({ title: text(x?.title ?? x), date: DATE.test(x?.date) ? x.date : '', time: TIME.test(x?.time) ? x.time : '' });
+  const callback = text(n.callback_after, 20);
+  return {
+    outcome: text(n.outcome, 30) || 'done',
+    headline: text(n.headline, 140),
+    summary: text(n.summary, 2000),
+    key_facts: Array.isArray(n.key_facts) ? n.key_facts.map((f) => text(f)).filter(Boolean).slice(0, 12) : [],
+    appointments: Array.isArray(n.appointments) ? n.appointments.map(dated).filter((a) => a.title && a.date).slice(0, 5) : [],
+    action_items: Array.isArray(n.action_items) ? n.action_items.map(dated).filter((a) => a.title).slice(0, 10) : [],
+    callback_after: /^(1h|tomorrow|\d{4}-\d{2}-\d{2})$/.test(callback) ? callback : '',
+  };
+}
+
 async function summarize(s) {
   if (!s.transcript.length) {
     s.summary = { outcome: 'no_conversation', headline: s.goal ? s.goal.slice(0, 90) : 'No conversation was captured', summary: '', action_items: [] };
@@ -300,13 +323,17 @@ async function summarize(s) {
       timeoutMs: 30000,
       system:
         `You write post-call notes for ${s.ownerName || config.ownerName}'s personal assistant. Be factual; never invent details not in the transcript. ` +
-        'Reply ONLY with JSON: {"outcome":"done|needs_you|failed|no_answer|voicemail","headline":"<under 12 words>","summary":"<2-4 sentences>","key_facts":["dates, times, prices, names, reference numbers"],"action_items":["<follow-ups for ' +
-        (s.ownerName || config.ownerName) +
-        '>"]}',
-      prompt: `Call to ${s.to}. Goal: ${s.goal || '(not given)'}\nAbout them: ${(s.about || '(none)').slice(0, 2000)}\nThis call: ${(s.brief || '(none)').slice(0, 8000)}
+        'appointments lists only things actually booked or agreed on the call that happen at a set day (and time, if one was agreed): use YYYY-MM-DD and 24-hour HH:mm, worked out from the owner\'s current date, and "" for an unknown time. ' +
+        'action_items are follow-ups the owner still has to do; give each a due date only if one was said. ' +
+        'callback_after is set only when the call should be tried again later (no answer, busy, closed, asked to call back): "1h", "tomorrow" or a YYYY-MM-DD date; otherwise "". ' +
+        'Reply ONLY with JSON: {"outcome":"done|needs_you|failed|no_answer|voicemail","headline":"<under 12 words>","summary":"<2-4 sentences>","key_facts":["dates, times, prices, names, reference numbers"],' +
+        '"appointments":[{"title":"<e.g. Dentist cleaning at Bright Smiles>","date":"YYYY-MM-DD","time":"HH:mm or empty"}],' +
+        '"action_items":[{"title":"<follow-up for ' + (s.ownerName || config.ownerName) + '>","date":"YYYY-MM-DD or empty"}],' +
+        '"callback_after":""}',
+      prompt: `Owner's current date and time: ${s.localNow || new Date().toISOString()}\nCall to ${s.to}. Goal: ${s.goal || '(not given)'}\nAbout them: ${(s.about || '(none)').slice(0, 2000)}\nThis call: ${(s.brief || '(none)').slice(0, 8000)}
 Plan objective: ${s.plan?.objective || '(none)'}\nMode: ${s.mode}\n\nTranscript:\n${transcriptText(s, 400)}`,
     });
-    s.summary = parseJson(text) || { outcome: 'done', headline: 'Call notes', summary: text, action_items: [] };
+    s.summary = normalizeSummary(parseJson(text)) || { outcome: 'done', headline: 'Call notes', summary: text, action_items: [] };
   } catch (err) {
     console.error(`[summary] failed: ${err.message}`);
     s.summary = { outcome: 'unknown', headline: 'Summary unavailable', summary: err.message, action_items: [] };

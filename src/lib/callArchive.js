@@ -48,8 +48,15 @@ export function hasFinal(item) {
   return !!saved && saved.final && saved.status === item.status && (!!saved.headline || !item.headline)
 }
 
+// Told about every call saved on this device (cloud sync backs them up for your other devices).
+const listeners = new Set()
+export function onCallArchived(fn) {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
+}
+
 /** Saves a full call record (only finished calls are worth keeping). */
-export function archiveCall(call) {
+export function archiveCall(call, { quiet = false } = {}) {
   if (!call?.id || !isFinished(call)) return false
   if (!write(CALL_KEY(call.id), call)) return false
   const item = { ...toListItem(call), final: !!call.summary || !!call.error || call.status !== 'ended' || !(call.transcript || []).length }
@@ -59,6 +66,7 @@ export function archiveCall(call) {
     try { localStorage.removeItem(CALL_KEY(old.id)) } catch { /* ignore */ }
   }
   write(INDEX_KEY, list.slice(0, MAX_CALLS))
+  if (!quiet) listeners.forEach((fn) => fn(call, item))
   return true
 }
 

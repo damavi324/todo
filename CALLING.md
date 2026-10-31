@@ -2,11 +2,20 @@
 
 The ToDo app now talks to your **CallPilot** server (the `callpilot` project) for three things:
 
-1. **Calls tab** (sidebar → Calls)
-   - **Pilot calls**: type or speak the goal and details, review the call plan, tap *Call now*. Watch the live transcript, answer Pilot's questions, or *Join the call*.
+1. **Calls** (sidebar or bottom tab → Calls). Built into the app, so it looks and works the same on the
+   phone and the web.
+   - **Assistant calls**: pick a contact or type a number, say what should happen, review the call plan,
+     tap *Call now*. Watch the live transcript, answer the assistant's questions (the other side is told
+     to hold and thanked while they wait, for up to 90 seconds), or *Join the call*.
    - **I'll talk**: dial from the app; the AI transcribes both sides and suggests what to say.
-   - Recent calls with their full log, **Redial with the same info/plan**, and a live **Logs** panel.
-   - After a call: summary, key details, and **Add as tasks** for the follow-ups.
+   - **Contacts**: name, number and notes ("Patient ID 48213, press 2 for appointments"). The notes go
+     with every call to that number. Unknown numbers can be saved from the call screen.
+   - **After a call**: the summary, then one tap to add what was **booked** (as a reminder at its date
+     and time), each **follow-up** (with its due date), or to **try again** later (in an hour, tomorrow
+     at 9, or when they said to call back). A try-again reminder carries the call, so its *Call* button
+     hands it straight back to the assistant.
+   - Recent calls with their full log, **Redial with the same info/plan**, and a **Logs** panel.
+   - Call history and contacts sync across your devices when you're signed in (see README).
 2. **One voice button** (the mic, on every screen). Talk naturally; Claude works out whether it's a task (title, date, time, priority, list), a call for Pilot, or both, e.g. "Remind me Friday at 9 to have Pilot call the dentist at 214 555 0100". A call for later is attached to the task; the task gets a **Call** button.
    If the calling server isn't set up or reachable, the button falls back to on-device speech and the old parser.
 3. **Calls keep running with the screen locked.** A foreground service shows an ongoing call notification with **Hang up**, keeps the connection alive, routes audio to the earpiece (Speaker toggle in the call), and pops a heads-up alert when Pilot needs an answer.

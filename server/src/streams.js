@@ -9,6 +9,8 @@ import {
 } from './sessions.js';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+// How long the agent holds for the owner's answer before carrying on without it.
+const OWNER_ANSWER_MS = Number(process.env.OWNER_ANSWER_MS) || 90000;
 
 // =====================================================================
 // Copilot stream: Twilio <Start><Stream track="both_tracks"> -> two live
@@ -194,7 +196,14 @@ export function handleAgentStream(twilioWs) {
 
     if (fn.name === 'ask_owner') {
       emit(session, 'agent_state', { state: 'waiting_for_you', detail: args.question });
-      const answer = await askOwner(session, args.question || 'Can you help?');
+      // The owner may need a moment to see the question. Don't leave the other person in silence: thank
+      // them for holding now and then, and give the owner time to answer before moving on.
+      const reassure = [
+        setTimeout(() => sendAgent({ type: 'InjectAgentMessage', message: 'Thanks for holding, I’m still checking on that.' }), 20000),
+        setTimeout(() => sendAgent({ type: 'InjectAgentMessage', message: 'Sorry for the wait, just a few more seconds.' }), 55000),
+      ];
+      const answer = await askOwner(session, args.question || 'Can you help?', OWNER_ANSWER_MS);
+      reassure.forEach(clearTimeout);
       emit(session, 'agent_state', { state: 'talking' });
       const who = session.ownerName || config.ownerName;
       respond(answer ? `${who} says: ${answer}` : `${who} did not answer in time. Do not agree to anything new; say ${who} will follow up, and continue or wrap up politely.`);

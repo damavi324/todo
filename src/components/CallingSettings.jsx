@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Phone, Loader2, CheckCircle2, LogOut } from 'lucide-react'
+import { Loader2, CheckCircle2, LogOut } from 'lucide-react'
 import { useTaskStore } from '../store/useTaskStore'
 import { useCallStore } from '../store/useCallStore'
 import { connectCallPilot, disconnectCallPilot, normalizeServerUrl } from '../lib/callpilot'
+import { Button, Note, fieldClass } from './ui'
 
-/** Settings → Calling: connect the app to your CallPilot server. */
+/** Settings → Calling: connect the app to your CallPilot server, and what the assistant knows about you. */
 export default function CallingSettings() {
   const settings = useTaskStore((s) => s.settings)
   const updateSettings = useTaskStore((s) => s.updateSettings)
@@ -12,17 +13,16 @@ export default function CallingSettings() {
   const [passcode, setPasscode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [ok, setOk] = useState('')
   const connected = settings.callpilotConnected && normalizeServerUrl(url) === settings.callpilotUrl
 
   const connect = async (e) => {
     e.preventDefault()
-    setBusy(true); setError(''); setOk('')
+    setBusy(true)
+    setError('')
     try {
-      const health = await connectCallPilot(url, passcode)
+      await connectCallPilot(url, passcode)
       setPasscode('')
-      setOk(`Connected. Calls opens ${normalizeServerUrl(url)}.`)
-      useCallStore.getState().disconnect()
+      useCallStore.getState().connect()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -33,58 +33,57 @@ export default function CallingSettings() {
   const disconnect = () => {
     disconnectCallPilot()
     useCallStore.getState().disconnect()
-    setOk(''); setError('')
+    setError('')
   }
 
   return (
-    <div>
-    <form onSubmit={connect} className="px-5 py-4 space-y-3">
-      <p className="text-xs text-ink-2 flex gap-2">
-        <Phone size={14} className="flex-shrink-0 mt-0.5 text-accent" />
-        <span>Calls opens this CallPilot page inside the app, so updates to that page show up without a new install. Use its permanent cloud address, or the link your PC prints after <code className="font-mono">npm run go</code>.</span>
-      </p>
-      <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://callpilot.onrender.com" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false}
-        className="w-full text-sm bg-surface-2 rounded-xl px-3 py-2.5 outline-none border border-line focus:border-primary" />
-      <input value={passcode} onChange={(e) => setPasscode(e.target.value)} type="password" placeholder={connected ? 'Passcode saved' : 'Server passcode'} autoComplete="current-password"
-        className="w-full text-sm bg-surface-2 rounded-xl px-3 py-2.5 outline-none border border-line focus:border-primary" />
-      {error && <p className="text-xs text-danger bg-danger/10 rounded-xl px-3 py-2.5">{error}</p>}
-      {(ok || connected) && !error && (
-        <p className="text-xs text-success bg-success/10 rounded-xl px-3 py-2.5 flex gap-2"><CheckCircle2 size={14} className="flex-shrink-0 mt-0.5" />{ok || `Connected to ${settings.callpilotUrl}`}</p>
-      )}
-      <button type="submit" disabled={busy || !url.trim()} className="w-full bg-primary text-white text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">
-        {busy && <Loader2 size={16} className="animate-spin" />}{busy ? 'Connecting… (a sleeping server takes up to a minute)' : connected ? 'Reconnect' : 'Connect'}
-      </button>
-      {settings.callpilotConnected && (
-        <button type="button" onClick={disconnect} className="w-full border border-danger/30 text-danger text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2">
-          <LogOut size={16} />Disconnect
-        </button>
-      )}
-    </form>
-    <div className="px-5 pb-4 space-y-3 border-t border-line">
-      <p className="text-xs font-semibold text-ink-2 pt-4">About you</p>
-      <p className="text-xs text-ink-2">Pilot uses this on every call. What you type on a single call is only for that call.</p>
-      <label className="block">
-        <span className="text-xs font-medium text-ink-2">Your name</span>
+    <>
+      <form onSubmit={connect} className="p-4 space-y-3">
+        <div>
+          <p className="text-sm text-ink">Calling server</p>
+          <p className="text-xs text-ink-3 mt-0.5">Your CallPilot server’s address and passcode. The same connection works on all your devices.</p>
+        </div>
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://callpilot.onrender.com" inputMode="url"
+          autoCapitalize="off" autoCorrect="off" spellCheck={false} className={`${fieldClass} w-full`} />
+        <input value={passcode} onChange={(e) => setPasscode(e.target.value)} type="password" autoComplete="current-password"
+          placeholder={connected ? 'Passcode saved' : 'Server passcode'} className={`${fieldClass} w-full`} />
+        {error && <Note tone="danger">{error}</Note>}
+        {connected && !error && (
+          <p className="text-xs text-success flex items-center gap-1.5"><CheckCircle2 size={14} />Connected to {settings.callpilotUrl}</p>
+        )}
+        <div className="flex gap-2">
+          <Button type="submit" variant="primary" size="sm" disabled={busy || !url.trim()} className="flex-1">
+            {busy && <Loader2 size={15} className="animate-spin" />}
+            {busy ? 'Connecting… a sleeping server takes up to a minute' : connected ? 'Reconnect' : 'Connect'}
+          </Button>
+          {settings.callpilotConnected && (
+            <Button size="sm" variant="ghost" onClick={disconnect}><LogOut size={15} />Disconnect</Button>
+          )}
+        </div>
+      </form>
+      <div className="p-4 space-y-3">
+        <div>
+          <p className="text-sm text-ink">About you</p>
+          <p className="text-xs text-ink-3 mt-0.5">The assistant uses this on every call. Details for one call go in that call.</p>
+        </div>
         <input
           value={settings.callerName ?? ''}
           onChange={(e) => updateSettings({ callerName: e.target.value })}
           placeholder={settings.userName || 'Your name'}
           maxLength={80}
-          className="mt-1 w-full text-sm bg-surface-2 rounded-xl px-3 py-2.5 outline-none border border-line focus:border-primary"
+          aria-label="Your name"
+          className={`${fieldClass} w-full`}
         />
-      </label>
-      <label className="block">
-        <span className="text-xs font-medium text-ink-2">Always okay to use</span>
         <textarea
           value={settings.callerAbout ?? ''}
           onChange={(e) => updateSettings({ callerAbout: e.target.value })}
           rows={4}
           maxLength={4000}
-          placeholder="Name you go by, city, account names, times that usually work. Leave out anything that changes from call to call."
-          className="mt-1 w-full text-sm bg-surface-2 rounded-xl px-3 py-2.5 outline-none border border-line focus:border-primary resize-y"
+          aria-label="Always okay to share"
+          placeholder="Always okay to share: the name you go by, your city, account names, times that usually work."
+          className="w-full rounded-lg bg-surface-2 px-3 py-2.5 text-sm text-ink outline-none border border-transparent focus:border-accent/50 focus:bg-surface resize-y"
         />
-      </label>
-    </div>
-    </div>
+      </div>
+    </>
   )
 }

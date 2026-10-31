@@ -48,7 +48,7 @@ const claudeServer = http.createServer((req, res) => {
       : isPlan
       ? 'Here is the plan:\n{"objective":"Move the cleaning to a weekday morning next week","opening":"I\'m calling to reschedule a cleaning for Mk Khanal.","steps":["Explain the reason","Offer Tue-Thu 8-11am"],"facts_to_share":[{"label":"Patient","value":"Mk Khanal"},{"label":"Bad","value":""}],"can_agree_to":["Any Tue-Thu slot 8-11am"],"ask_owner_before":["Any fee"],"never_share":["Card number"],"likely_questions":[{"q":"Date of birth?","a":"Ask Mk"}],"if_phone_menu":"Press 2 for appointments","if_voicemail":"Hi, this is Pilot for Mk Khanal about rescheduling.","confirm_before_hanging_up":["date","time"],"missing_info":["Insurance provider"]}'
       : isSummary
-      ? '{"outcome":"done","headline":"Cleaning moved to Tue 9am","summary":"The office moved the appointment.","key_facts":["Tue 9:00 am"],"action_items":["Add to calendar"]}'
+      ? '{"outcome":"done","headline":"Cleaning moved to Tue 9am","summary":"The office moved the appointment.","key_facts":["Tue 9:00 am"],"appointments":[{"title":"Dental cleaning","date":"2026-11-03","time":"09:00"},{"title":"No date","date":"next week"}],"action_items":["Bring insurance card",{"title":"Pay the $25 fee","date":"2026-11-02"}],"callback_after":"sometime"}'
       : '```json\n{"say":["Could you do Tuesday at 9am?"],"note":"They mentioned a $25 fee"}\n```';
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ content: [{ type: 'text', text }] }));
@@ -219,7 +219,7 @@ try {
   const ui = await uiSocket();
 
   // ---- copilot call ----
-  r = await req('/api/sessions', { method: 'POST', body: { mode: 'copilot', to: '(214) 555-0123', goal: 'Move cleaning', brief: 'Free Tue-Thu mornings' } });
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'copilot', to: '(214) 555-0123', goal: 'Move cleaning', brief: 'Free Tue-Thu mornings', localNow: 'Friday 2026-10-30 18:05 America/Chicago' } });
   assert.equal(r.status, 200);
   const cop = r.json.session;
   assert.equal(cop.to, '+12145550123');
@@ -285,6 +285,16 @@ try {
   r = await req('/api/sessions');
   assert.ok(r.json.history.some((h) => h.id === cop.id && h.headline === 'Cleaning moved to Tue 9am'));
   pass('Post-call summary with Claude, saved to call history');
+
+  // Notes come back in one shape: real appointments only, follow-ups as {title, date}, no made-up retry times.
+  assert.deepEqual(sum.summary.appointments, [{ title: 'Dental cleaning', date: '2026-11-03', time: '09:00' }]);
+  assert.deepEqual(sum.summary.action_items, [
+    { title: 'Bring insurance card', date: '', time: '' },
+    { title: 'Pay the $25 fee', date: '2026-11-02', time: '' },
+  ]);
+  assert.equal(sum.summary.callback_after, '');
+  assert.ok(claudeRequests.some((c) => /post-call/.test(c.json.system) && /Friday 2026-10-30 18:05 America\/Chicago/.test(c.json.messages[0].content)), 'summary knows the date of the owner');
+  pass('Call notes: booked appointments with dates, dated follow-ups, and the owner local date');
 
   // ---- dictation ----
   const dws = new WebSocket(`ws://localhost:${PORTS.app}/dictate?rate=16000`, { headers: { cookie } });

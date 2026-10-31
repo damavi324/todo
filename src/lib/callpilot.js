@@ -1,5 +1,6 @@
 // Client for the CallPilot server (calls, plans, voice assistant, live events).
 import { useTaskStore } from '../store/useTaskStore'
+import { toLocalYMD, toLocalHM } from './dates'
 
 export function normalizeServerUrl(input) {
   let u = String(input || '').trim()
@@ -150,9 +151,12 @@ export const ownerName = () => {
 /** Name and standing details sent with every call. The call screen only adds what is specific to that call. */
 export function callerContext() {
   const s = useTaskStore.getState().settings
+  const now = new Date()
   return {
     owner: (s.callerName || s.userName || '').trim(),
     about: (s.callerAbout || '').trim(),
+    // So the call notes can turn "next Tuesday at 9" into a real date.
+    localNow: `${now.toLocaleDateString('en-US', { weekday: 'long' })} ${toLocalYMD(now)} ${toLocalHM(now)} ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
   }
 }
 
