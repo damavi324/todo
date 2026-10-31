@@ -13,13 +13,13 @@ export const DEFAULT_SETTINGS = {
   notificationStyle: 'sticky',
   notificationRepeatMinutes: 10,
   voiceRemindersEnabled: true,
+  // Your profile: the name reminders greet you by and the assistant calls on behalf of, and standing facts
+  // it may share on any call. Details for a single call stay on that call.
   userName: 'MK',
+  callerAbout: '',
   // Empty means the phone's best voice for its language.
   voiceName: '',
   voicePitch: 1,
-  // Standing facts Pilot may use on every call. The note on a single call stays on that call.
-  callerName: '',
-  callerAbout: '',
   googleCalendarEnabled: false,
   googleCalendarId: 'primary',
   // Android only: read upcoming events from the phone's calendar instead of from Google.
@@ -32,6 +32,15 @@ export const DEFAULT_SETTINGS = {
   callpilotOwner: '',
   callpilotAssistant: 'Pilot',
   callpilotProblems: [],
+}
+
+/**
+ * There used to be a separate name for calls (callerName). It becomes the one profile name: it was the more
+ * deliberate choice, since the reminder name started out as a default.
+ */
+export function mergeProfile(settings) {
+  const { callerName, ...rest } = settings
+  return callerName?.trim() ? { ...rest, userName: callerName.trim() } : rest
 }
 
 export const useTaskStore = create(
@@ -165,7 +174,7 @@ export const useTaskStore = create(
       merge: (persisted, current) => ({
         ...current,
         ...persisted,
-        settings: { ...current.settings, ...(persisted?.settings || {}) },
+        settings: mergeProfile({ ...current.settings, ...(persisted?.settings || {}) }),
       }),
     }
   )

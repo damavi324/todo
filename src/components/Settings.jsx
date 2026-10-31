@@ -164,7 +164,7 @@ export default function Settings({ onClose }) {
   return (
     <Sheet title="Settings" onClose={onClose}>
       <div className="px-4 md:px-6 py-5 space-y-7">
-        <Section title="Account">
+        <Section title="Profile">
           {!gcalSignedIn ? (
             <div className="p-4 space-y-3">
               <p className="text-sm text-ink-2">
@@ -213,6 +213,36 @@ export default function Settings({ onClose }) {
               )}
             </>
           )}
+          <div className="p-4 space-y-3">
+            <label className="block">
+              <span className="block text-sm text-ink">Name</span>
+              <span className="block text-xs text-ink-3 mt-0.5 mb-2">
+                Reminders greet you by it (“{spokenText('buy groceries', (settings.userName || '').trim())}”), and the
+                assistant calls on your behalf with it.
+              </span>
+              <input
+                value={settings.userName || ''}
+                onChange={(e) => changeReminderSetting({ userName: e.target.value })}
+                placeholder="Your name"
+                maxLength={80}
+                className={`${fieldClass} w-full`}
+              />
+            </label>
+            <label className="block">
+              <span className="block text-sm text-ink">About you</span>
+              <span className="block text-xs text-ink-3 mt-0.5 mb-2">
+                Facts the assistant may share on any call. Anything for one call goes in that call.
+              </span>
+              <textarea
+                value={settings.callerAbout ?? ''}
+                onChange={(e) => updateSettings({ callerAbout: e.target.value })}
+                rows={4}
+                maxLength={4000}
+                placeholder="e.g. I go by Mk. I live in Dallas. Weekday mornings usually work. My insurance is Aetna."
+                className="w-full rounded-lg bg-surface-2 px-3 py-2.5 text-sm text-ink outline-none border border-transparent focus:border-accent/50 focus:bg-surface resize-y"
+              />
+            </label>
+          </div>
         </Section>
 
         <Section title="Reminders">
@@ -221,15 +251,6 @@ export default function Settings({ onClose }) {
               label="Speak reminders aloud"
               checked={settings.voiceRemindersEnabled !== false}
               onChange={handleVoiceToggle}
-            />
-          </Row>
-          <Row label="Your name" hint={`“${spokenText('buy groceries', (settings.userName || '').trim())}”`}>
-            <input
-              value={settings.userName || ''}
-              onChange={(e) => changeReminderSetting({ userName: e.target.value })}
-              placeholder="Your name"
-              maxLength={30}
-              className={`${fieldClass} w-40`}
             />
           </Row>
           <Row label="Voice">

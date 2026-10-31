@@ -8,7 +8,6 @@ import { Button, Note, fieldClass } from './ui'
 /** Settings → Calling: connect the app to your CallPilot server, and what the assistant knows about you. */
 export default function CallingSettings() {
   const settings = useTaskStore((s) => s.settings)
-  const updateSettings = useTaskStore((s) => s.updateSettings)
   const [url, setUrl] = useState(settings.callpilotUrl || '')
   const [passcode, setPasscode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -61,29 +60,7 @@ export default function CallingSettings() {
           )}
         </div>
       </form>
-      <div className="p-4 space-y-3">
-        <div>
-          <p className="text-sm text-ink">About you</p>
-          <p className="text-xs text-ink-3 mt-0.5">The assistant uses this on every call. Details for one call go in that call.</p>
-        </div>
-        <input
-          value={settings.callerName ?? ''}
-          onChange={(e) => updateSettings({ callerName: e.target.value })}
-          placeholder={settings.userName || 'Your name'}
-          maxLength={80}
-          aria-label="Your name"
-          className={`${fieldClass} w-full`}
-        />
-        <textarea
-          value={settings.callerAbout ?? ''}
-          onChange={(e) => updateSettings({ callerAbout: e.target.value })}
-          rows={4}
-          maxLength={4000}
-          aria-label="Always okay to share"
-          placeholder="Always okay to share: the name you go by, your city, account names, times that usually work."
-          className="w-full rounded-lg bg-surface-2 px-3 py-2.5 text-sm text-ink outline-none border border-transparent focus:border-accent/50 focus:bg-surface resize-y"
-        />
-      </div>
+      <p className="px-4 py-3 text-xs text-ink-3">The assistant calls on behalf of the name and details in your profile above.</p>
     </>
   )
 }

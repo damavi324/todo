@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { GoogleAuthProvider, onAuthStateChanged, signInWithCredential, signOut } from 'firebase/auth'
 import { collection, deleteDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore'
 import { cloud, isCloudConfigured } from './firebase'
-import { useTaskStore, DEFAULT_LISTS, DEFAULT_SETTINGS } from '../store/useTaskStore'
+import { useTaskStore, DEFAULT_LISTS, DEFAULT_SETTINGS, mergeProfile } from '../store/useTaskStore'
 import { syncReminders } from './notifications'
 import { archiveCall, archivedCall, archivedList, forgetCall, onCallArchived, mergeHistory } from './callArchive'
 import { useCallStore } from '../store/useCallStore'
@@ -24,7 +24,6 @@ const SHARED_SETTINGS = [
   'notificationRepeatMinutes',
   'voiceRemindersEnabled',
   'userName',
-  'callerName',
   'callerAbout',
   'googleCalendarId',
   'callpilotUrl',
@@ -167,7 +166,7 @@ function mirrorProfile(db, uid, { mayUpload }) {
     }
     const s = useTaskStore.getState()
     applyRemote({
-      settings: { ...s.settings, ...pick(data.settings || {}) },
+      settings: { ...s.settings, ...pick(mergeProfile(data.settings || {})) },
       dismissedEventIds: data.dismissedEventIds || s.dismissedEventIds,
     })
   }, reportError)
