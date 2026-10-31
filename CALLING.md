@@ -24,7 +24,7 @@ The ToDo app now talks to your **CallPilot** server (the `callpilot` project) fo
 
 Settings → **Calling** → server address + passcode → **Connect**.
 - Render (current host): the `https://….onrender.com` address from the blueprint deploy. Setup is in `server/DEPLOY-RENDER.md`. A free instance sleeps after about 15 minutes and the app waits up to a minute for it to wake.
-- Google Cloud Run: kept for a later switch. See `server/DEPLOY-CLOUD-RUN.md`. Do not run it at the same time as Render.
+- Google Cloud Run (recommended, project todo-88bb6): see `server/DEPLOY-CLOUD-RUN.md`. It wakes in seconds. Do not run it at the same time as Render.
 - Your PC: the link `npm run go` prints. It changes on every restart, so re-enter it after restarting.
 
 ## Build the APK (Windows)
