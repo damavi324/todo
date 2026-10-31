@@ -5,10 +5,10 @@ import { startDictation } from '../lib/dictation'
 import { parseSpokenTask } from '../lib/voiceTask'
 import { toLocalYMD } from '../lib/dates'
 import { useTaskStore } from '../store/useTaskStore'
+import { PRIORITY_COLOR } from '../lib/views'
 import { useCallStore } from '../store/useCallStore'
 import SpeechCapture from '../plugins/SpeechCapture'
 
-const PRIORITY_COLOR = { high: '#EF4444', medium: '#F97316', low: '#3B82F6' }
 
 function localNow() {
   const d = new Date()
@@ -135,24 +135,24 @@ export default function VoiceAssistant({ onClose, onTask, onCall }) {
   const callDraft = (r) => ({ mode: r.call.mode, to: r.call.to, goal: r.call.goal || (r.call.contact ? `Call ${r.call.contact}` : ''), brief: [r.call.contact && `Calling: ${r.call.contact}`, r.call.details].filter(Boolean).join('\n') })
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-end" onClick={(e) => e.target === e.currentTarget && phase !== 'listening' && cancel()}>
-      <div className="w-full bg-white rounded-t-3xl px-6 pt-6 pb-10 max-h-[85dvh] overflow-y-auto slide-up">
+    <div className="fixed inset-0 z-50 bg-black/30 flex items-end md:items-center md:justify-center fade-in" onClick={(e) => e.target === e.currentTarget && phase !== 'listening' && cancel()}>
+      <div className="w-full md:w-[480px] bg-surface rounded-t-2xl md:rounded-2xl shadow-pop px-6 pt-6 pb-8 max-h-[85dvh] overflow-y-auto slide-up md:fade-in safe-bottom">
         {phase === 'listening' && (
           <>
             <div className="flex items-center gap-3">
-              <span className="relative flex w-3 h-3"><span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping" /><span className="relative inline-flex rounded-full w-3 h-3 bg-red-500" /></span>
-              <p className="text-lg font-semibold text-gray-800">Listening…</p>
+              <span className="relative flex w-3 h-3"><span className="absolute inline-flex h-full w-full rounded-full bg-danger opacity-75 animate-ping" /><span className="relative inline-flex rounded-full w-3 h-3 bg-danger" /></span>
+              <p className="text-lg font-semibold text-ink">Listening…</p>
             </div>
-            <p className={`mt-3 min-h-[3.5rem] text-[17px] leading-snug ${text ? 'text-gray-900' : 'text-gray-400'}`}>
+            <p className={`mt-3 min-h-[3.5rem] text-[17px] leading-snug ${text ? 'text-ink' : 'text-ink-3'}`}>
               {text || (smart ? `Say anything: "Remind me Friday at 9 to renew my license", or "Have ${assistantName()} call the dentist at 214 555 0100 to move my cleaning."` : 'Say the task, including the day and time.')}
             </p>
             {smart && !onDevice ? (
               <div className="flex gap-2 mt-5">
-                <button onClick={finish} className="flex-[2] bg-primary text-white font-semibold py-3.5 rounded-2xl">Done</button>
-                <button onClick={cancel} className="flex-1 bg-gray-100 text-gray-800 font-medium py-3.5 rounded-2xl">Cancel</button>
+                <button onClick={finish} className="flex-[2] bg-primary text-white font-medium h-11 rounded-lg">Done</button>
+                <button onClick={cancel} className="flex-1 bg-surface-2 text-ink font-medium h-11 rounded-lg">Cancel</button>
               </div>
             ) : (
-              <button onClick={cancel} className="mt-5 w-full bg-gray-100 text-gray-800 font-medium py-3 rounded-2xl">Cancel</button>
+              <button onClick={cancel} className="mt-5 w-full bg-surface-2 text-ink font-medium h-11 rounded-lg">Cancel</button>
             )}
           </>
         )}
@@ -161,20 +161,20 @@ export default function VoiceAssistant({ onClose, onTask, onCall }) {
           <div className="flex items-center gap-3 py-4">
             <Loader2 className="animate-spin text-primary" size={22} />
             <div>
-              <p className="font-semibold text-gray-800">{waking ? 'Waking up the server…' : 'Working it out…'}</p>
-              {waking && <p className="text-xs text-gray-500 mt-0.5">It was asleep. This takes up to a minute the first time.</p>}
-              <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">&ldquo;{text}&rdquo;</p>
+              <p className="font-semibold text-ink">{waking ? 'Waking up the server…' : 'Working it out…'}</p>
+              {waking && <p className="text-xs text-ink-2 mt-0.5">It was asleep. This takes up to a minute the first time.</p>}
+              <p className="text-sm text-ink-2 mt-0.5 line-clamp-2">&ldquo;{text}&rdquo;</p>
             </div>
           </div>
         )}
 
         {phase === 'error' && (
           <>
-            <p className="font-semibold text-gray-800">That didn’t work</p>
-            <p className="text-sm text-gray-600 mt-1">{error}</p>
+            <p className="font-semibold text-ink">That didn’t work</p>
+            <p className="text-sm text-ink-2 mt-1">{error}</p>
             <div className="flex gap-2 mt-5">
-              <button onClick={begin} className="flex-1 flex items-center justify-center gap-2 bg-primary text-white font-semibold py-3 rounded-2xl"><RotateCcw size={16} />Try again</button>
-              <button onClick={cancel} className="flex-1 bg-gray-100 text-gray-800 font-medium py-3 rounded-2xl">Close</button>
+              <button onClick={begin} className="flex-1 flex items-center justify-center gap-2 bg-primary text-white font-medium h-11 rounded-lg"><RotateCcw size={16} />Try again</button>
+              <button onClick={cancel} className="flex-1 bg-surface-2 text-ink font-medium h-11 rounded-lg">Close</button>
             </div>
           </>
         )}
@@ -182,38 +182,38 @@ export default function VoiceAssistant({ onClose, onTask, onCall }) {
         {phase === 'result' && result && (
           <>
             <div className="flex items-start gap-3">
-              <p className="flex-1 font-semibold text-gray-900">{result.kind === 'unclear' ? (result.question || 'Can you say that a little differently?') : (result.say || 'Here’s what I got')}</p>
-              <button onClick={cancel} aria-label="Close" className="p-1.5 rounded-full bg-gray-100 text-gray-500"><X size={16} /></button>
+              <p className="flex-1 font-semibold text-ink">{result.kind === 'unclear' ? (result.question || 'Can you say that a little differently?') : (result.say || 'Here’s what I got')}</p>
+              <button onClick={cancel} aria-label="Close" className="w-8 h-8 -mr-2 -mt-1 rounded-lg flex items-center justify-center text-ink-3 hover:bg-surface-2"><X size={16} /></button>
             </div>
-            <p className="text-xs text-gray-400 mt-1">&ldquo;{result.heard}&rdquo;</p>
+            <p className="text-xs text-ink-3 mt-1">&ldquo;{result.heard}&rdquo;</p>
 
             {result.task && (
-              <div className="mt-4 rounded-2xl border border-gray-200 p-3.5">
-                <p className="text-xs font-semibold text-gray-500">Task</p>
-                <p className="font-medium text-gray-900 mt-0.5">{result.task.title}</p>
-                <p className="text-sm text-gray-500 flex items-center gap-2 mt-0.5">
+              <div className="mt-4 rounded-xl border border-line p-3.5">
+                <p className="text-xs font-semibold text-ink-2">Task</p>
+                <p className="font-medium text-ink mt-0.5">{result.task.title}</p>
+                <p className="text-sm text-ink-2 flex items-center gap-2 mt-0.5">
                   {describeDue(result.task) || 'No date'}
                   {PRIORITY_COLOR[result.task.priority] && <Flag size={13} style={{ color: PRIORITY_COLOR[result.task.priority] }} />}
-                  {result.call?.when === 'later' && <span className="text-emerald-700">· {assistantName()} call attached</span>}
+                  {result.call?.when === 'later' && <span className="text-accent">· {assistantName()} call attached</span>}
                 </p>
-                <button onClick={() => onTask(taskWithCall(result), { review: true })} className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-primary text-white font-semibold py-2.5"><CalendarPlus size={16} />Review and save</button>
+                <button onClick={() => onTask(taskWithCall(result), { review: true })} className="mt-3 w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-white font-medium h-10"><CalendarPlus size={16} />Review and save</button>
               </div>
             )}
 
             {result.call && (
-              <div className="mt-3 rounded-2xl border border-gray-200 p-3.5">
-                <p className="text-xs font-semibold text-gray-500">{result.call.when === 'later' ? 'Call, or make it now' : 'Call'}</p>
-                <p className="font-medium text-gray-900 mt-0.5">{result.call.contact || formatNumber(result.call.to) || 'Who to call?'}</p>
-                {result.call.goal && <p className="text-sm text-gray-500 mt-0.5">{result.call.goal}</p>}
-                {!result.call.to && <p className="text-xs text-amber-700 mt-1">No number heard. You can add it on the next screen.</p>}
-                <button onClick={() => onCall(callDraft(result))} className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 text-white font-semibold py-2.5">
+              <div className="mt-3 rounded-xl border border-line p-3.5">
+                <p className="text-xs font-semibold text-ink-2">{result.call.when === 'later' ? 'Call, or make it now' : 'Call'}</p>
+                <p className="font-medium text-ink mt-0.5">{result.call.contact || formatNumber(result.call.to) || 'Who to call?'}</p>
+                {result.call.goal && <p className="text-sm text-ink-2 mt-0.5">{result.call.goal}</p>}
+                {!result.call.to && <p className="text-xs text-warn mt-1">No number heard. You can add it on the next screen.</p>}
+                <button onClick={() => onCall(callDraft(result))} className="mt-3 w-full flex items-center justify-center gap-2 rounded-lg bg-accent text-white font-medium h-10">
                   <Phone size={16} />{result.call.mode === 'copilot' ? 'Set up my call' : `Have ${assistantName()} call ${result.call.when === 'later' ? 'now' : ''}`.trim()}
                 </button>
               </div>
             )}
 
             {result.kind === 'unclear' && (
-              <button onClick={begin} className="mt-4 w-full flex items-center justify-center gap-2 bg-primary text-white font-semibold py-3 rounded-2xl"><RotateCcw size={16} />Say it again</button>
+              <button onClick={begin} className="mt-4 w-full flex items-center justify-center gap-2 bg-primary text-white font-medium h-11 rounded-lg"><RotateCcw size={16} />Say it again</button>
             )}
           </>
         )}

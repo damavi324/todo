@@ -1,21 +1,22 @@
 import { useState, useEffect } from 'react'
 import { App as CapApp } from '@capacitor/app'
-import Sidebar from './components/Sidebar'
+import { CalendarClock, CalendarDays, LayoutList, Mic, Phone, Plus, Settings as SettingsIcon, X } from 'lucide-react'
+import Sidebar, { Navigation } from './components/Sidebar'
 import TaskList from './components/TaskList'
-import AddTaskModal from './components/AddTaskModal'
+import TaskEditor from './components/TaskEditor'
 import Settings from './components/Settings'
-import { Menu, Plus, X, Mic } from 'lucide-react'
+import { LogsSheet } from './components/Calls'
+import VoiceAssistant from './components/VoiceAssistant'
+import { IconButton } from './components/ui'
 import { useTaskStore } from './store/useTaskStore'
+import { useCallStore } from './store/useCallStore'
 import { syncReminders, applyNotificationCompletions } from './lib/notifications'
 import { autoImport } from './lib/googleCalendar'
 import { saveTask } from './lib/saveTask'
 import { startCloudSync } from './lib/cloudSync'
 import { dueDateTime, formatDue } from './lib/dates'
-import VoiceReminder from './plugins/VoiceReminder'
-import { LogsSheet } from './components/Calls'
-import VoiceAssistant from './components/VoiceAssistant'
-import { useCallStore } from './store/useCallStore'
 import { normalizeServerUrl, wakeServer } from './lib/callpilot'
+import VoiceReminder from './plugins/VoiceReminder'
 
 // Bring the app in line with what happened while it was closed or in the background.
 async function refresh() {
@@ -26,18 +27,18 @@ async function refresh() {
 }
 
 export default function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [addOpen, setAddOpen] = useState(false)
-  const [draft, setDraft] = useState(null)
+  // The task being edited, or a new task's starting values. null when the editor is closed.
+  const [editor, setEditor] = useState(null)
   const [voiceOpen, setVoiceOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Phones only: the Lists tab, which shows every view and list to pick from.
+  const [browsing, setBrowsing] = useState(false)
   const calendarError = useTaskStore((s) => s.calendarError)
   const setCalendarError = useTaskStore((s) => s.setCalendarError)
   const appView = useTaskStore((s) => s.appView)
   const setAppView = useTaskStore((s) => s.setAppView)
   const callpilotUrl = useTaskStore((s) => s.settings.callpilotUrl)
   const callpilotConnected = useTaskStore((s) => s.settings.callpilotConnected)
-  const notice = useCallStore((s) => s.notice)
   const question = useCallStore((s) => s.question)
 
   // Calls is the live CallPilot page, which owns the phone line. Wake the server, but
@@ -54,16 +55,18 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [callpilotUrl, callpilotConnected])
 
-  // Short-lived toast for call notices.
+  // Short-lived toast for call notices and voice-saved tasks.
   const [toast, setToast] = useState(null)
+  useEffect(() => useCallStore.subscribe((s, prev) => {
+    if (s.notice && s.notice !== prev.notice) setToast(s.notice)
+  }), [])
   useEffect(() => {
-    if (!notice) return
-    setToast(notice)
-    const t = setTimeout(() => setToast(null), notice.level === 'error' ? 6000 : 3000)
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), toast.level === 'error' ? 6000 : 3500)
     return () => clearTimeout(t)
-  }, [notice])
+  }, [toast])
 
-  // Pilot asked something while you're on another screen: bring Calls forward.
+  // The assistant asked something while you're on another screen: bring Calls forward.
   useEffect(() => {
     if (question) setAppView('calls')
   }, [question, setAppView])
@@ -81,8 +84,7 @@ export default function App() {
         console.error(e)
       }
     }
-    setDraft(task)
-    setAddOpen(true)
+    setEditor({ draft: task })
   }
 
   // Follow the signed-in account so tasks match on every device.
@@ -98,76 +100,74 @@ export default function App() {
     return () => handles.forEach((h) => Promise.resolve(h).then((l) => l?.remove?.()))
   }, [])
 
+  const openTask = (task) => setEditor({ task })
+  const newTask = () => setEditor({ draft: null })
+  const showCalls = appView === 'calls'
+
   return (
-    <div className="flex h-dvh bg-[#f7f8fc] overflow-hidden">
-      {/* Sidebar overlay on mobile */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-40 flex">
-          <div className="w-72 h-full shadow-2xl">
-            <Sidebar
-              onClose={() => setSidebarOpen(false)}
-              onOpenSettings={() => { setSidebarOpen(false); setSettingsOpen(true) }}
-            />
-          </div>
-          <div className="flex-1 bg-black/40" onClick={() => setSidebarOpen(false)} />
-        </div>
-      )}
+    <div className="flex h-dvh bg-bg text-ink overflow-hidden">
+      <aside className="hidden md:block w-64 flex-shrink-0">
+        <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
+      </aside>
 
-      {/* Desktop sidebar (hidden on mobile) */}
-      <div className="hidden md:block w-64 flex-shrink-0">
-        <Sidebar
-          onOpenSettings={() => setSettingsOpen(true)}
-        />
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0 relative">
-        {/* Top bar */}
-        <div className="flex items-center px-4 pt-12 pb-2 md:hidden">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="p-2 rounded-xl hover:bg-gray-200 transition-colors">
-            <Menu size={22} className="text-gray-600" />
-          </button>
-        </div>
-
+      <main className="flex-1 flex flex-col min-w-0 relative pb-16 md:pb-0">
         {calendarError && (
-          <div className="mx-4 mb-1 flex items-start gap-2 rounded-xl bg-red-50 px-3 py-2.5 text-xs text-red-700">
+          <div className="mx-3 md:mx-6 mt-3 flex items-start gap-2 rounded-lg bg-danger/10 px-3 py-2.5 text-[13px] text-danger safe-top">
             <span className="flex-1">{calendarError}</span>
             <button onClick={() => setCalendarError('')} aria-label="Dismiss" className="flex-shrink-0">
-              <X size={14} />
+              <X size={15} />
             </button>
           </div>
         )}
 
-        {appView === 'calls'
-          ? <CallPilotPage url={callpilotUrl} connected={callpilotConnected} onOpenSettings={() => setSettingsOpen(true)} />
-          : <TaskList />}
+        {browsing && !showCalls ? (
+          <BrowseLists onPick={() => setBrowsing(false)} onOpenSettings={() => setSettingsOpen(true)} />
+        ) : showCalls ? (
+          <CallPilotPage url={callpilotUrl} connected={callpilotConnected} onOpenSettings={() => setSettingsOpen(true)} />
+        ) : (
+          <TaskList
+            onOpenTask={openTask}
+            onNewTask={newTask}
+            onVoice={() => setVoiceOpen(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
 
-        <button
-          type="button"
-          onClick={() => setVoiceOpen(true)}
-          disabled={voiceOpen}
-          aria-label="Speak a task or a call"
-          className={`fixed bottom-8 ${appView === 'calls' ? 'right-6' : 'right-24'} w-14 h-14 bg-white border border-gray-200 rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-transform z-30 disabled:opacity-60`}>
-          <Mic size={24} className={voiceOpen ? 'text-red-500' : 'text-primary'} />
-        </button>
-        {appView !== 'calls' && (
-          <button
-            onClick={() => { setDraft(null); setAddOpen(true) }}
-            aria-label="Add a task"
-            className="fixed bottom-8 right-6 w-14 h-14 bg-primary rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-transform z-30"
-            style={{ boxShadow: '0 4px 20px rgba(71,114,250,0.4)' }}>
-            <Plus size={26} className="text-white" />
-          </button>
+        {/* Phone: speak and add, above the tab bar. */}
+        {!showCalls && !browsing && (
+          <div className="md:hidden fixed right-4 bottom-[84px] z-30 flex flex-col items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setVoiceOpen(true)}
+              disabled={voiceOpen}
+              aria-label="Speak a task or a call"
+              className="w-12 h-12 rounded-full bg-surface shadow-pop flex items-center justify-center text-accent active:scale-95 transition-transform"
+            >
+              <Mic size={20} />
+            </button>
+            <button
+              type="button"
+              onClick={newTask}
+              aria-label="New task"
+              className="w-14 h-14 rounded-2xl bg-accent text-accent-ink shadow-pop flex items-center justify-center active:scale-95 transition-transform"
+            >
+              <Plus size={24} />
+            </button>
+          </div>
         )}
 
         {toast && (
-          <div role="status" className={`fixed top-12 left-4 right-4 z-[70] rounded-2xl px-4 py-3 text-sm shadow-lg ${toast.level === 'error' ? 'bg-red-600 text-white' : 'bg-[#1a1d2e] text-white'}`}>
+          <div role="status" className="fixed z-[70] left-4 right-4 bottom-24 md:left-auto md:right-6 md:bottom-6 md:w-96 rounded-xl px-4 py-3 text-sm shadow-pop fade-in bg-ink text-bg">
             {toast.message}
           </div>
         )}
-      </div>
+      </main>
+
+      <TabBar
+        browsing={browsing}
+        onBrowse={() => { setBrowsing(true) }}
+        onPick={() => setBrowsing(false)}
+      />
 
       {voiceOpen && (
         <VoiceAssistant
@@ -177,14 +177,60 @@ export default function App() {
         />
       )}
 
-      {addOpen && (
-        <AddTaskModal
-          draft={draft}
-          onClose={() => { setAddOpen(false); setDraft(null) }}
+      {editor && (
+        <TaskEditor
+          key={editor.task?.id || 'new'}
+          editTask={editor.task}
+          draft={editor.draft}
+          onClose={() => setEditor(null)}
         />
       )}
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
       <LogsSheet />
+    </div>
+  )
+}
+
+/** Phone navigation. On wider screens the sidebar does this. */
+function TabBar({ browsing, onBrowse, onPick }) {
+  const { selectedList, setSelectedList, appView, setAppView } = useTaskStore()
+  const tabs = [
+    { id: 'today', label: 'Today', icon: CalendarDays, active: appView === 'tasks' && !browsing && selectedList === 'today', go: () => setSelectedList('today') },
+    { id: 'scheduled', label: 'Upcoming', icon: CalendarClock, active: appView === 'tasks' && !browsing && selectedList === 'scheduled', go: () => setSelectedList('scheduled') },
+    { id: 'lists', label: 'Lists', icon: LayoutList, active: appView === 'tasks' && (browsing || !['today', 'scheduled'].includes(selectedList)), go: onBrowse },
+    { id: 'calls', label: 'Calls', icon: Phone, active: appView === 'calls', go: () => setAppView('calls') },
+  ]
+  return (
+    <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface/95 backdrop-blur border-t border-line safe-bottom">
+      <div className="flex h-16">
+        {tabs.map(({ id, label, icon: Icon, active, go }) => (
+          <button
+            key={id}
+            onClick={() => { if (id !== 'lists') onPick(); go() }}
+            aria-current={active ? 'page' : undefined}
+            className={`flex-1 flex flex-col items-center justify-center gap-1 text-[11px] font-medium ${active ? 'text-accent' : 'text-ink-3'}`}
+          >
+            <Icon size={21} strokeWidth={active ? 2.2 : 1.8} />
+            {label}
+          </button>
+        ))}
+      </div>
+    </nav>
+  )
+}
+
+function BrowseLists({ onPick, onOpenSettings }) {
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="safe-top px-5 pt-6 pb-4 flex items-end">
+        <h1 className="flex-1 text-[28px] leading-tight font-semibold tracking-tight">Lists</h1>
+        <IconButton label="Settings" onClick={onOpenSettings} className="-mr-2 mb-0.5">
+          <SettingsIcon size={20} />
+        </IconButton>
+      </div>
+      <div className="px-3 pb-28">
+        <Navigation onPick={onPick} large />
+      </div>
     </div>
   )
 }
@@ -194,9 +240,17 @@ function CallPilotPage({ url, connected, onOpenSettings }) {
   const src = normalizeServerUrl(url)
   if (!connected || !src) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-3">
-        <p className="text-sm text-gray-600">Add your CallPilot address in Settings. Calls opens that page.</p>
-        <button type="button" onClick={onOpenSettings} className="bg-primary text-white text-sm font-medium px-4 py-2.5 rounded-xl">Open settings</button>
+      <div className="flex-1 flex flex-col items-center justify-center px-8 text-center">
+        <span className="w-12 h-12 rounded-2xl bg-accent/10 text-accent flex items-center justify-center mb-4">
+          <Phone size={22} />
+        </span>
+        <h2 className="text-lg font-semibold">Let your assistant make calls</h2>
+        <p className="text-sm text-ink-3 mt-1.5 max-w-sm">
+          Connect your calling server in Settings to book appointments, wait on hold and handle calls for you.
+        </p>
+        <button type="button" onClick={onOpenSettings} className="mt-5 h-10 px-4 rounded-lg bg-accent text-accent-ink text-sm font-medium">
+          Set up calling
+        </button>
       </div>
     )
   }
@@ -204,7 +258,7 @@ function CallPilotPage({ url, connected, onOpenSettings }) {
     <iframe
       title="Calls"
       src={src}
-      className="flex-1 w-full min-h-0 border-0 bg-white"
+      className="flex-1 w-full min-h-0 border-0 bg-surface"
       allow="microphone *; autoplay; speaker-selection"
     />
   )

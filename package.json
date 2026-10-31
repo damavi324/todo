@@ -21,6 +21,7 @@
     "@capacitor/cli": "^8.5.3",
     "@capacitor/core": "^8.5.3",
     "@capgo/capacitor-social-login": "^8.5.15",
+    "@fontsource-variable/inter": "^5.2.8",
     "@twilio/voice-sdk": "^2.18.5",
     "firebase": "^13.1.0",
     "lucide-react": "^1.14.0",

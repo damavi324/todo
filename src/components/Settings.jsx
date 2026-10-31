@@ -17,7 +17,8 @@ import VoiceReminder from '../plugins/VoiceReminder'
 import DeviceCalendar from '../plugins/DeviceCalendar'
 import { isCloudConfigured } from '../lib/firebase'
 import { useSyncStore } from '../lib/cloudSync'
-import { X, Calendar, Volume2, LogOut, LogIn, RefreshCw, Play, Check } from 'lucide-react'
+import { LogOut, LogIn, RefreshCw, Play, Check } from 'lucide-react'
+import { Button, IconButton, Note, Sheet, Switch, fieldClass } from './ui'
 import CallingSettings from './CallingSettings'
 
 export default function Settings({ onClose }) {
@@ -158,150 +159,117 @@ export default function Settings({ onClose }) {
 
   const handleImport = () => runImport(setSyncMsg)
 
-  return (
-    <div className="fixed inset-0 z-50 bg-white flex flex-col">
-      <div className="flex items-center gap-3 px-4 pt-12 pb-4 border-b border-gray-100">
-        <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100">
-          <X size={20} className="text-gray-600" />
-        </button>
-        <h1 className="text-lg font-semibold text-gray-800">Settings</h1>
-      </div>
+  const initial = (accountEmail || sync.email || '?').trim().charAt(0).toUpperCase()
 
-      <div className="flex-1 overflow-y-auto">
-        {isCloudConfigured() && (
-          <Section title="Sync">
-            <div className="px-5 py-4 space-y-3">
-              {sync.status === 'signed-out' ? (
-                <>
-                  <p className="text-xs text-gray-500">
-                    Sign in with Google to keep your tasks, lists and settings the same on your phone and the web.
-                    Everything still works offline and catches up when you&apos;re back online.
-                  </p>
-                  {authError && (
-                    <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2.5">{authError}</p>
+  return (
+    <Sheet title="Settings" onClose={onClose}>
+      <div className="px-4 md:px-6 py-5 space-y-7">
+        <Section title="Account">
+          {!gcalSignedIn ? (
+            <div className="p-4 space-y-3">
+              <p className="text-sm text-ink-2">
+                Sign in with Google to keep your tasks the same on your phone and the web, and to connect Google Calendar.
+                {isCloudConfigured() && ' Everything still works offline and catches up when you reconnect.'}
+              </p>
+              {!authConfigured && (
+                <Note tone="warn">
+                  Developer setup needed: add <code className="font-mono">VITE_GOOGLE_WEB_CLIENT_ID</code> to{' '}
+                  <code className="font-mono">.env.local</code> and create the matching Android OAuth client
+                  (package <code className="font-mono">com.todo.voice</code> + SHA-1).
+                </Note>
+              )}
+              {authError && <Note tone="danger">{authError}</Note>}
+              <Button variant="primary" onClick={handleSignIn} disabled={!authConfigured || busy} className="w-full">
+                <LogIn size={16} />
+                {busy ? 'Signing in…' : 'Sign in with Google'}
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 px-4 py-3.5">
+                <span className="w-9 h-9 rounded-full bg-accent/10 text-accent font-semibold flex items-center justify-center flex-shrink-0">
+                  {initial}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-ink truncate">{accountEmail || sync.email || 'Google account'}</p>
+                  {isCloudConfigured() && sync.status !== 'signed-out' && (
+                    <p className="text-xs text-ink-3 flex items-center gap-1.5 mt-0.5">
+                      <span className={`w-1.5 h-1.5 rounded-full ${SYNC_DOT[sync.status] || 'bg-line'}`} />
+                      {sync.status === 'error' ? sync.error || 'Sync problem' : SYNC_LABEL[sync.status]}
+                    </p>
                   )}
-                  <button
-                    onClick={handleSignIn}
-                    disabled={!authConfigured || busy}
-                    className="w-full bg-primary text-white text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40"
-                  >
-                    <LogIn size={16} />
-                    {busy ? 'Signing in…' : gcalSignedIn ? 'Turn on sync' : 'Sign in with Google'}
-                  </button>
-                </>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${SYNC_DOT[sync.status] || 'bg-gray-300'}`} />
-                  <div className="min-w-0">
-                    <p className="text-sm text-gray-700">{SYNC_LABEL[sync.status] || 'Sync'}</p>
-                    <p className="text-xs text-gray-400 truncate">{sync.error || sync.email}</p>
-                  </div>
+                </div>
+                <Button variant="ghost" size="sm" onClick={handleSignOut} disabled={busy}>
+                  <LogOut size={15} />Sign out
+                </Button>
+              </div>
+              {isCloudConfigured() && sync.status === 'signed-out' && (
+                <div className="px-4 pb-4 space-y-2">
+                  {authError && <Note tone="danger">{authError}</Note>}
+                  <Button variant="primary" size="sm" onClick={handleSignIn} disabled={busy} className="w-full">
+                    Turn on sync
+                  </Button>
                 </div>
               )}
-            </div>
-          </Section>
-        )}
-
-        <Section title="Calling">
-          <CallingSettings />
+            </>
+          )}
         </Section>
 
-        <Section title="Notifications">
-          <Row label="Voice reminders">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={settings.voiceRemindersEnabled !== false}
-              onClick={() => handleVoiceToggle(!(settings.voiceRemindersEnabled !== false))}
-              className={`relative w-11 h-6 rounded-full transition-colors ${
-                settings.voiceRemindersEnabled !== false ? 'bg-primary' : 'bg-gray-300'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                  settings.voiceRemindersEnabled !== false ? 'translate-x-5' : ''
-                }`}
-              />
-            </button>
+        <Section title="Reminders">
+          <Row label="Speak reminders aloud" hint={isNative ? 'Works even when the app is closed.' : 'Only while this tab is open.'}>
+            <Switch
+              label="Speak reminders aloud"
+              checked={settings.voiceRemindersEnabled !== false}
+              onChange={handleVoiceToggle}
+            />
           </Row>
-          <Row label="Call me">
+          <Row label="Your name" hint={`“${spokenText('buy groceries', (settings.userName || '').trim())}”`}>
             <input
               value={settings.userName || ''}
               onChange={(e) => changeReminderSetting({ userName: e.target.value })}
               placeholder="Your name"
               maxLength={30}
-              className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-1.5 outline-none w-40"
+              className={`${fieldClass} w-40`}
             />
           </Row>
           <Row label="Voice">
             <select
               value={voices.some((v) => v.id === settings.voiceName) ? settings.voiceName : ''}
               onChange={(e) => changeReminderSetting({ voiceName: e.target.value })}
-              className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-1.5 outline-none w-48">
+              className={`${fieldClass} w-44`}
+            >
               <option value="">Automatic</option>
-              {voices.map((v) => (
-                <option key={v.id} value={v.id}>{v.label}</option>
-              ))}
+              {voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
             </select>
           </Row>
           <Row label="Pitch">
-            <select
-              value={settings.voicePitch}
-              onChange={(e) => changeReminderSetting({ voicePitch: Number(e.target.value) })}
-              className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-1.5 outline-none w-48">
-              {PITCHES.map((p) => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </select>
-          </Row>
-          <div className="px-5 py-3">
-            <button
-              type="button"
-              onClick={() => announce('buy groceries').catch(console.error)}
-              className="w-full bg-gray-100 text-gray-800 text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2">
-              <Play size={16} />
-              Play this voice
-            </button>
-          </div>
-          <p className="text-xs text-gray-400 px-5 pb-3 flex gap-2">
-            <Volume2 size={14} className="flex-shrink-0 mt-0.5" />
-            <span>
-              When a task is due the phone says “{spokenText('buy groceries', (settings.userName || '').trim())}”
-              {isNative ? ' It works even if the app is closed, and plays at media volume.' : ' Only while this tab is open.'}
-            </span>
-          </p>
-          {(isNative || permStatus) && (
-            <div className="px-5 pb-3 space-y-2">
-              {permStatus && (
-                <p className="text-xs text-gray-500">
-                  Notifications: {permStatus.notifications}
-                  {isNative ? ` · Exact alarms: ${permStatus.exactAlarms}` : ''}
-                </p>
-              )}
-              <button
-                type="button"
-                onClick={handleRequestPermissions}
-                className="w-full bg-gray-100 text-gray-800 text-sm font-medium py-2.5 rounded-xl"
+            <div className="flex items-center gap-2">
+              <select
+                value={settings.voicePitch}
+                onChange={(e) => changeReminderSetting({ voicePitch: Number(e.target.value) })}
+                className={`${fieldClass} w-32`}
               >
-                Grant reminder permissions
-              </button>
+                {PITCHES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </select>
+              <IconButton label="Preview the voice" onClick={() => announce('buy groceries').catch(console.error)}>
+                <Play size={16} />
+              </IconButton>
             </div>
-          )}
-          <Row label="Notification Style">
-            <select
-              value={settings.notificationStyle}
-              onChange={(e) => changeReminderSetting({ notificationStyle: e.target.value })}
-              className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-1.5 outline-none">
-              <option value="sticky">Sticky (stays until done)</option>
-              <option value="normal">Normal (can be swiped away)</option>
-            </select>
+          </Row>
+          <Row label="Until done" hint="Keeps the notification up until you mark the task done.">
+            <Switch
+              label="Keep notifications until done"
+              checked={settings.notificationStyle === 'sticky'}
+              onChange={(on) => changeReminderSetting({ notificationStyle: on ? 'sticky' : 'normal' })}
+            />
           </Row>
           {settings.notificationStyle === 'sticky' && (
-            <Row label="Re-alert every">
+            <Row label="Remind again every">
               <select
                 value={settings.notificationRepeatMinutes}
                 onChange={(e) => changeReminderSetting({ notificationRepeatMinutes: Number(e.target.value) })}
-                className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-1.5 outline-none">
+                className={`${fieldClass} w-32`}
+              >
                 <option value={0}>Never</option>
                 <option value={5}>5 minutes</option>
                 <option value={10}>10 minutes</option>
@@ -311,198 +279,130 @@ export default function Settings({ onClose }) {
               </select>
             </Row>
           )}
-          <p className="text-xs text-gray-400 px-5 pb-3">
-            A sticky reminder stays in your notifications until the task is done. If you swipe it away or
-            clear all notifications it comes straight back. Use <strong>Mark Done</strong> on the notification,
-            or complete the task in the app, to remove it.
-          </p>
+          {(isNative || permStatus) && (
+            <Row
+              label="Permissions"
+              hint={permStatus ? `Notifications ${permStatus.notifications}${isNative ? ` · exact alarms ${permStatus.exactAlarms}` : ''}` : undefined}
+            >
+              <Button size="sm" onClick={handleRequestPermissions}>Grant</Button>
+            </Row>
+          )}
         </Section>
 
-        {isNative && (
-          <Section title="Phone calendar">
-            <Row label="Show events from this phone">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={!!settings.phoneCalendarEnabled}
-                disabled={busy}
-                onClick={() => handlePhoneToggle(!settings.phoneCalendarEnabled)}
-                className={`relative w-11 h-6 rounded-full transition-colors ${
-                  settings.phoneCalendarEnabled ? 'bg-primary' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                    settings.phoneCalendarEnabled ? 'translate-x-5' : ''
-                  }`}
-                />
-              </button>
-            </Row>
-            <p className="text-xs text-gray-400 px-5 py-3">
-              Reads the next two weeks from the calendar on this phone, the same events the Samsung Calendar app
-              shows, across all your accounts. Tasks you create are still saved to Google Calendar below.
-            </p>
-            {readsPhone && phoneCalendars.length > 0 && (
-              <div className="px-5 pb-2">
-                {phoneCalendars.map((c) => {
-                  const shown = !(settings.phoneCalendarHiddenIds || []).includes(c.id)
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      role="checkbox"
-                      aria-checked={shown}
-                      disabled={busy}
-                      onClick={() => togglePhoneCalendar(c.id)}
-                      className="w-full flex items-center gap-3 py-2 text-left"
-                    >
-                      <span
-                        className={`w-5 h-5 rounded-md border-2 flex-shrink-0 flex items-center justify-center ${
-                          shown ? 'bg-primary border-primary' : 'border-gray-300'
-                        }`}
-                      >
-                        {shown && <Check size={14} className="text-white" />}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-sm text-gray-700 truncate">{c.name || 'Calendar'}</span>
-                        {c.account && c.account !== c.name && (
-                          <span className="block text-xs text-gray-400 truncate">{c.account}</span>
-                        )}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-            {readsPhone && (
-              <div className="px-5 pb-3">
-                <button
-                  type="button"
-                  onClick={() => runImport(setPhoneMsg)}
+        <Section title="Calendar">
+          {isNative && (
+            <>
+              <Row label="This phone's calendar" hint="Show the next two weeks of events from every account on this phone.">
+                <Switch
+                  label="Show events from this phone"
+                  checked={!!settings.phoneCalendarEnabled}
                   disabled={busy}
-                  className="w-full bg-gray-100 text-gray-800 text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40"
-                >
-                  <RefreshCw size={16} />
-                  Sync calendar now
-                </button>
-              </div>
-            )}
-            {phoneMsg && <p className="text-xs text-gray-500 px-5 pb-3">{phoneMsg}</p>}
-          </Section>
-        )}
-
-        <Section title="Google Calendar">
-          {!gcalSignedIn ? (
-            <div className="px-5 pb-4 space-y-3">
-              <p className="text-xs text-gray-500">
-                {readsPhone
-                  ? 'Sign in with Google to create Calendar events from tasks.'
-                  : 'Sign in with Google to create Calendar events from tasks and import upcoming events.'}
-                Uses Google&apos;s account picker on your phone — no Client ID pasted in the app.
-              </p>
-              {!authConfigured && (
-                <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2.5">
-                  Developer setup needed: add <code className="font-mono">VITE_GOOGLE_WEB_CLIENT_ID</code> to{' '}
-                  <code className="font-mono">.env.local</code>, create matching Android OAuth client
-                  (package <code className="font-mono">com.todo.voice</code> + SHA-1), then rebuild.
-                </p>
-              )}
-              {authError && (
-                <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2.5">{authError}</p>
-              )}
-              <button
-                onClick={handleSignIn}
-                disabled={!authConfigured || busy}
-                className="w-full bg-primary text-white text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40"
-              >
-                <LogIn size={16} />
-                {busy ? 'Signing in…' : 'Sign in with Google'}
-              </button>
-            </div>
-          ) : (
-            <div className="px-5 pb-4 space-y-3">
-              <div className="flex flex-col gap-1 text-sm text-green-700 bg-green-50 rounded-xl px-3 py-2.5">
-                <div className="flex items-center gap-2">
-                  <Calendar size={16} />
-                  <span>Connected to Google Calendar</span>
+                  onChange={handlePhoneToggle}
+                />
+              </Row>
+              {readsPhone && phoneCalendars.length > 0 && (
+                <div className="px-4 py-2">
+                  {phoneCalendars.map((c) => {
+                    const shown = !(settings.phoneCalendarHiddenIds || []).includes(c.id)
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={shown}
+                        disabled={busy}
+                        onClick={() => togglePhoneCalendar(c.id)}
+                        className="w-full flex items-center gap-3 py-2 text-left"
+                      >
+                        <span className={`w-[18px] h-[18px] rounded-[5px] border-[1.5px] flex-shrink-0 flex items-center justify-center ${
+                          shown ? 'bg-accent border-accent text-accent-ink' : 'border-ink-3'
+                        }`}>
+                          {shown && <Check size={12} strokeWidth={3} />}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-sm text-ink truncate">{c.name || 'Calendar'}</span>
+                          {c.account && c.account !== c.name && (
+                            <span className="block text-xs text-ink-3 truncate">{c.account}</span>
+                          )}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
-                {accountEmail && (
-                  <span className="text-xs text-green-800/80 pl-6">{accountEmail}</span>
-                )}
-              </div>
-              <Row label="Calendar">
+              )}
+              {phoneMsg && <p className="text-xs text-ink-2 px-4 py-3">{phoneMsg}</p>}
+            </>
+          )}
+          {gcalSignedIn ? (
+            <>
+              <Row label="Add tasks to Google Calendar" hint="Tasks with a date become calendar events.">
+                <Switch
+                  label="Add tasks to Google Calendar"
+                  checked={!!settings.googleCalendarEnabled}
+                  onChange={(on) => updateSettings({ googleCalendarEnabled: on })}
+                />
+              </Row>
+              <Row label="Calendar ID" hint="Usually “primary”.">
                 <input
                   value={settings.googleCalendarId}
                   onChange={(e) => updateSettings({ googleCalendarId: e.target.value })}
                   placeholder="primary"
-                  className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-1.5 outline-none w-40"
+                  className={`${fieldClass} w-40`}
                 />
               </Row>
-              {!readsPhone && (
-                <>
-                  <button
-                    type="button"
-                    onClick={handleImport}
-                    disabled={busy}
-                    className="w-full bg-gray-100 text-gray-800 text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40"
-                  >
-                    <RefreshCw size={16} />
-                    Sync calendar now
-                  </button>
-                  <p className="text-xs text-gray-400">
-                    The next two weeks of calendar events are imported automatically whenever you open the app.
-                  </p>
-                </>
-              )}
-              {syncMsg && <p className="text-xs text-gray-500">{syncMsg}</p>}
-              <button
-                onClick={handleSignOut}
-                disabled={busy}
-                className="w-full border border-red-200 text-red-500 text-sm font-medium py-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40"
-              >
-                <LogOut size={16} />
-                Sign out of Google
-              </button>
-              <p className="text-xs text-gray-400">
-                You can also revoke access anytime at myaccount.google.com → Security → Third-party access.
-              </p>
-            </div>
+            </>
+          ) : (
+            <p className="text-sm text-ink-3 px-4 py-3.5">Sign in above to connect Google Calendar.</p>
+          )}
+          {(gcalSignedIn || readsPhone) && (
+            <Row label="Import upcoming events" hint={syncMsg || 'Happens automatically when you open the app.'}>
+              <Button size="sm" onClick={readsPhone ? () => runImport(setPhoneMsg) : handleImport} disabled={busy}>
+                <RefreshCw size={14} />Sync now
+              </Button>
+            </Row>
           )}
         </Section>
+
+        <Section title="Calling">
+          <CallingSettings />
+        </Section>
       </div>
-    </div>
+    </Sheet>
   )
 }
 
 const SYNC_LABEL = {
   connecting: 'Connecting…',
-  synced: 'Synced',
+  synced: 'Synced across your devices',
   pending: 'Saving changes…',
   offline: 'Offline. Changes will sync when you reconnect.',
   error: 'Sync problem',
 }
 const SYNC_DOT = {
-  synced: 'bg-green-500',
-  pending: 'bg-amber-400',
-  connecting: 'bg-amber-400',
-  offline: 'bg-gray-400',
-  error: 'bg-red-500',
+  synced: 'bg-success',
+  pending: 'bg-warn',
+  connecting: 'bg-warn',
+  offline: 'bg-ink-3',
+  error: 'bg-danger',
 }
 
 function Section({ title, children }) {
   return (
-    <div className="mt-4">
-      <p className="text-xs text-gray-400 uppercase tracking-wider px-5 mb-2">{title}</p>
-      <div className="bg-white border-y border-gray-100">{children}</div>
-    </div>
+    <section>
+      <h3 className="px-1 mb-2 text-[13px] font-semibold text-ink-2">{title}</h3>
+      <div className="bg-surface rounded-xl border border-line divide-y divide-line">{children}</div>
+    </section>
   )
 }
 
-function Row({ label, children }) {
+function Row({ label, hint, children }) {
   return (
-    <div className="flex items-center justify-between px-5 py-3 border-b border-gray-50 last:border-0">
-      <span className="text-sm text-gray-700">{label}</span>
-      {children}
+    <div className="flex items-center justify-between gap-4 px-4 py-3 min-h-[56px]">
+      <div className="min-w-0">
+        <p className="text-sm text-ink">{label}</p>
+        {hint && <p className="text-xs text-ink-3 mt-0.5">{hint}</p>}
+      </div>
+      <div className="flex-shrink-0">{children}</div>
     </div>
   )
 }
