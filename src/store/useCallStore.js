@@ -19,6 +19,16 @@ let device = null
 let devicePromise = null
 let historyTimer = null
 
+/** What was asked for on a call, without the contact background `withContact` added to it. */
+export function withoutContact(brief, to) {
+  const contact = contactFor(to)
+  if (!contact) return brief || ''
+  return String(brief || '')
+    .split('\n')
+    .filter((line) => line !== `Calling: ${contact.name}` && !line.startsWith(`About ${contact.name}: `))
+    .join('\n')
+}
+
 /** A saved contact's name and notes ride along as background, so the assistant knows who it's calling. */
 function withContact(body) {
   const contact = contactFor(body.to)
@@ -116,8 +126,9 @@ export const useCallStore = create((set, get) => ({
     set({ connected: false, phoneState: 'off' })
   },
 
-  notify(message, level = 'info') {
-    set({ notice: { message, level, at: Date.now() } })
+  /** A toast. `action` ({ label, run }) adds a button to it, such as Undo. */
+  notify(message, level = 'info', action = null) {
+    set({ notice: { message, level, action, at: Date.now() } })
   },
 
   handleEvent(ev) {
@@ -265,9 +276,9 @@ export const useCallStore = create((set, get) => ({
   },
 
   async makePlan(body) {
-    body = withContact(body)
     await get().ensureAwake()
-    const { plan } = await cp('/api/plan', { ...callerContext(), ...body }, { timeoutMs: 90000 })
+    const { plan } = await cp('/api/plan', { ...callerContext(), ...withContact(body) }, { timeoutMs: 90000 })
+    // Kept as you wrote it (Edit puts it back in the form); the contact's details are added again on dialing.
     set({ pending: { ...body, plan }, view: 'plan' })
     return plan
   },

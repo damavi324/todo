@@ -8,6 +8,7 @@ import { useTaskStore } from '../store/useTaskStore'
 import { PRIORITY_COLOR } from '../lib/views'
 import { useCallStore } from '../store/useCallStore'
 import SpeechCapture from '../plugins/SpeechCapture'
+import { useBack } from '../lib/backStack'
 
 
 function localNow() {
@@ -29,7 +30,7 @@ function describeDue(t) {
  * Talk naturally; Claude decides whether it is a task, a call for Pilot, or both.
  * Falls back to on-device speech + the old parser when the calling server is not set up.
  */
-export default function VoiceAssistant({ onClose, onTask, onCall }) {
+export default function VoiceAssistant({ onClose, onTask: handTask, onCall }) {
   const lists = useTaskStore((s) => s.lists)
   const [phase, setPhase] = useState('listening') // listening | thinking | result | error
   const [text, setText] = useState('')
@@ -39,6 +40,9 @@ export default function VoiceAssistant({ onClose, onTask, onCall }) {
   const [waking, setWaking] = useState(false)
   const [onDevice, setOnDevice] = useState(false) // phone's own recognizer (stops by itself)
   const smart = isCallPilotReady()
+  // Closed while it was still working something out: drop the late result instead of acting on it.
+  const closed = useRef(false)
+  const onTask = (...args) => { if (!closed.current) handTask(...args) }
 
   // Turns what you said into a task and/or a call (Claude on the server, local parser as backup).
   const interpret = async (heard) => {
@@ -127,17 +131,21 @@ export default function VoiceAssistant({ onClose, onTask, onCall }) {
   }
 
   const cancel = () => {
+    closed.current = true
     rec.current?.cancel()
     SpeechCapture.stop?.().catch(() => {})
     onClose()
   }
 
+  useBack(cancel)
+
   const taskWithCall = (r) => ({ ...r.task, listId: r.task.listId || undefined, call: r.call ? { to: r.call.to, contact: r.call.contact, goal: r.call.goal, details: r.call.details, mode: r.call.mode } : undefined })
   const callDraft = (r) => ({ mode: r.call.mode, to: r.call.to, goal: r.call.goal || (r.call.contact ? `Call ${r.call.contact}` : ''), brief: [r.call.contact && `Calling: ${r.call.contact}`, r.call.details].filter(Boolean).join('\n') })
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/30 flex items-end md:items-center md:justify-center fade-in" onClick={(e) => e.target === e.currentTarget && phase !== 'listening' && cancel()}>
-      <div className="w-full md:w-[480px] bg-surface rounded-t-2xl md:rounded-2xl shadow-pop px-6 pt-6 pb-8 max-h-[85dvh] overflow-y-auto slide-up md:fade-in safe-bottom">
+    <div role="dialog" aria-modal="true" aria-label="Voice assistant"
+      className="fixed inset-0 z-50 bg-black/30 flex items-end md:items-center md:justify-center fade-in" onClick={(e) => e.target === e.currentTarget && phase !== 'listening' && cancel()}>
+      <div className="w-full md:w-[480px] bg-surface rounded-t-2xl md:rounded-2xl shadow-pop px-6 pt-6 pb-[calc(2rem+env(safe-area-inset-bottom,0px))] md:pb-8 max-h-[85dvh] overflow-y-auto slide-up md:fade-in">
         {phase === 'listening' && (
           <>
             <div className="flex items-center gap-3">

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ChevronRight, Loader2, Mic, Pencil, Plus, Settings, CornerDownLeft } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { ChevronLeft, ChevronRight, Loader2, Mic, Pencil, Plus, Settings, CornerDownLeft } from 'lucide-react'
 import { useTaskStore } from '../store/useTaskStore'
 import { groupView, openCount, viewName } from '../lib/views'
 import { parseSpokenTask } from '../lib/voiceTask'
@@ -15,10 +15,13 @@ const EMPTY = {
   all: ['No tasks yet', 'Add your first one below.'],
 }
 
-export default function TaskList({ onOpenTask, onNewTask, onVoice, onOpenSettings }) {
+export default function TaskList({ onOpenTask, onNewTask, onVoice, onOpenSettings, onBrowse }) {
   const { selectedList, lists, tasks } = useTaskStore()
   const [showDone, setShowDone] = useState(false)
   const [editingList, setEditingList] = useState(false)
+  // Each view opens at its top, not wherever the last one was scrolled to.
+  const scroller = useRef(null)
+  useEffect(() => { if (scroller.current) scroller.current.scrollTop = 0 }, [selectedList])
   const { groups, done } = groupView(selectedList, tasks)
   const smartView = ['today', 'scheduled', 'all'].includes(selectedList)
   const list = !smartView && lists.find((l) => l.id === selectedList)
@@ -33,6 +36,12 @@ export default function TaskList({ onOpenTask, onNewTask, onVoice, onOpenSetting
       <header className="safe-top flex-shrink-0">
         <div className="max-w-3xl mx-auto w-full px-5 md:px-10 pt-6 md:pt-10 pb-4 flex items-end gap-3">
           <div className="flex-1 min-w-0">
+            {/* Phones: lists and All tasks are opened from the Lists tab, so offer the way back to it. */}
+            {!['today', 'scheduled'].includes(selectedList) && onBrowse && (
+              <button onClick={onBrowse} className="md:hidden flex items-center -ml-1.5 mb-1 h-8 pr-2 text-sm font-medium text-accent">
+                <ChevronLeft size={18} />Lists
+              </button>
+            )}
             <div className="flex items-center gap-1 min-w-0">
               <h1 className="text-[28px] md:text-[30px] leading-tight font-semibold tracking-tight text-ink truncate">{title}</h1>
               {list && (
@@ -56,7 +65,7 @@ export default function TaskList({ onOpenTask, onNewTask, onVoice, onOpenSetting
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto">
+      <div ref={scroller} className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto w-full px-3 md:px-10 pb-36 md:pb-16">
           <QuickAdd viewId={selectedList} />
 
@@ -148,6 +157,7 @@ function QuickAdd({ viewId }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
+          enterKeyHint="done"
           placeholder="Add a task, e.g. “Pay rent Friday 9am”"
           aria-label="Add a task"
           className="flex-1 min-w-0 bg-transparent outline-none text-[14.5px] text-ink"

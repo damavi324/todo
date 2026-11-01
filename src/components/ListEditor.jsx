@@ -55,10 +55,10 @@ export default function ListEditor({ list, onClose }) {
         <label className="block">
           <span className="block text-sm font-medium text-ink mb-1.5">Name</span>
           <input
-            autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && save()}
+            enterKeyHint="done"
             maxLength={60}
             className={`${fieldClass} w-full`}
           />

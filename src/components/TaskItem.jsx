@@ -7,7 +7,8 @@ import { assistantName } from '../lib/callpilot'
 import { formatDue, parseLocalDate, startOfToday } from '../lib/dates'
 import { isReminder } from '../lib/taskKind'
 import { PRIORITY_COLOR } from '../lib/views'
-import { toggleDone, removeTask, startTaskCall } from '../lib/taskActions'
+import { toggleDone, deleteWithUndo, startTaskCall } from '../lib/taskActions'
+import { useBack } from '../lib/backStack'
 
 const LONG_PRESS_MS = 450
 
@@ -15,11 +16,13 @@ export default function TaskItem({ task, onOpen, showList = false }) {
   const list = useTaskStore((s) => (showList ? s.lists.find((l) => l.id === task.listId) : null))
   const [menuOpen, setMenuOpen] = useState(false)
   const reminder = isReminder(task)
-  const press = useRef({ timer: null, x: 0, y: 0, held: false })
+  const press = useRef({ timer: null, x: 0, y: 0, held: false, at: 0 })
+  useBack(() => setMenuOpen(false), menuOpen)
 
   const openMenu = () => {
     clearTimeout(press.current.timer)
     press.current.held = true
+    press.current.at = Date.now()
     setMenuOpen(true)
   }
   const startPress = (e) => {
@@ -32,10 +35,12 @@ export default function TaskItem({ task, onOpen, showList = false }) {
   const movePress = (e) => {
     if (Math.abs(e.clientX - press.current.x) > 10 || Math.abs(e.clientY - press.current.y) > 10) endPress()
   }
-  // Lifting the finger after a long press must not also tick or open the task.
+  // Lifting the finger after a long press must not also tick or open the task, or land on the menu that just
+  // opened under it. Only that one click: a later tap (such as outside the menu, to close it) works normally.
   const swallowHeldClick = (e) => {
     if (!press.current.held) return
     press.current.held = false
+    if (Date.now() - press.current.at > 700) return
     e.stopPropagation()
     e.preventDefault()
   }
@@ -66,15 +71,20 @@ export default function TaskItem({ task, onOpen, showList = false }) {
           <Bell size={16} />
         </span>
       ) : (
+        // A 40px tap area around the 20px circle, so a slightly-off tap still ticks it.
         <button
           onClick={(e) => { e.stopPropagation(); toggleDone(task) }}
           aria-label={task.completed ? 'Mark not done' : 'Mark done'}
-          className={`mt-0.5 w-5 h-5 rounded-full border-[1.5px] flex-shrink-0 flex items-center justify-center transition-colors ${
-            task.completed ? 'bg-accent border-accent text-accent-ink' : 'hover:bg-surface-2'
-          }`}
-          style={!task.completed ? { borderColor: ring || 'rgb(var(--ink-3))', background: ring ? `${ring}14` : undefined } : undefined}
+          className="-mx-2.5 -mt-2 -mb-2.5 w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full group/tick"
         >
-          {task.completed && <Check size={12} strokeWidth={3} />}
+          <span
+            className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors ${
+              task.completed ? 'bg-accent border-accent text-accent-ink' : 'group-hover/tick:bg-surface-2'
+            }`}
+            style={!task.completed ? { borderColor: ring || 'rgb(var(--ink-3))', background: ring ? `${ring}14` : undefined } : undefined}
+          >
+            {task.completed && <Check size={12} strokeWidth={3} />}
+          </span>
         </button>
       )}
 
@@ -121,10 +131,15 @@ export default function TaskItem({ task, onOpen, showList = false }) {
         <MoreHorizontal size={16} />
       </button>
 
+      {/* React passes events from the menu up to this task row even though it's drawn elsewhere on the page,
+          so stop them at the menu: tapping outside it must only close it, not open the task. */}
       {menuOpen && createPortal(
-        <div className="fixed inset-0 z-50 flex items-end md:items-center md:justify-center" onClick={() => setMenuOpen(false)}>
+        <div role="dialog" aria-modal="true" aria-label={task.title}
+          className="fixed inset-0 z-50 flex items-end md:items-center md:justify-center cursor-default"
+          onClick={(e) => { e.stopPropagation(); setMenuOpen(false) }}
+          onPointerDown={stop} onPointerMove={stop} onPointerUp={stop} onContextMenu={(e) => { stop(e); e.preventDefault() }}>
           <div className="absolute inset-0 bg-black/30 fade-in" />
-          <div className="relative w-full md:w-80 bg-surface rounded-t-2xl md:rounded-xl shadow-pop slide-up md:fade-in p-2 pb-6 md:pb-2 safe-bottom"
+          <div className="relative w-full md:w-80 bg-surface rounded-t-2xl md:rounded-xl shadow-pop slide-up md:fade-in px-2 pt-2 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] md:pb-2"
             onClick={(e) => e.stopPropagation()}>
             <p className="px-3 pt-2 pb-2 text-[13px] font-medium text-ink-2 truncate">{task.title}</p>
             {!reminder && (
@@ -134,7 +149,7 @@ export default function TaskItem({ task, onOpen, showList = false }) {
             <MenuItem icon={Volume2} label="Read aloud" onClick={pick(() => announce(task.title).catch(console.error))} />
             {task.call && <MenuItem icon={Phone} label={`Have ${assistantName()} call`} onClick={pick(() => startTaskCall(task))} />}
             <div className="my-1 border-t border-line" />
-            <MenuItem icon={Trash2} label="Delete" danger onClick={pick(() => removeTask(task))} />
+            <MenuItem icon={Trash2} label="Delete" danger onClick={pick(() => deleteWithUndo(task).catch(console.error))} />
           </div>
         </div>,
         document.body
@@ -142,6 +157,8 @@ export default function TaskItem({ task, onOpen, showList = false }) {
     </div>
   )
 }
+
+const stop = (e) => e.stopPropagation()
 
 function MenuItem({ icon: Icon, label, danger, onClick }) {
   return (

@@ -2,6 +2,7 @@ import { useTaskStore } from '../store/useTaskStore'
 import { syncReminders } from './notifications'
 import { deleteCalendarEvent, calendarActive, reportCalendarError } from './googleCalendar'
 import { useCallStore } from '../store/useCallStore'
+import { saveTask } from './saveTask'
 
 export function toggleDone(task) {
   useTaskStore.getState().toggleTask(task.id)
@@ -21,6 +22,23 @@ export async function removeTask(task) {
   }
   deleteTask(task.id)
   syncReminders().catch(console.error)
+}
+
+/** Delete a task, with an Undo button on the toast in case it was a mis-tap. */
+export async function deleteWithUndo(task) {
+  await removeTask(task)
+  useCallStore.getState().notify(`Deleted “${task.title}”`, 'info', { label: 'Undo', run: () => restoreTask(task).catch(console.error) })
+}
+
+/** Put a deleted task back, with its reminder and (for the app's own tasks) a new calendar event. */
+async function restoreTask(task) {
+  if (task.source === 'calendar') {
+    useTaskStore.getState().restoreTask(task)
+    return syncReminders()
+  }
+  const restored = { ...task, googleEventId: null }
+  useTaskStore.getState().restoreTask(restored)
+  await saveTask({}, restored)
 }
 
 /** Hand the task's attached call (or the task itself) to the assistant on the Calls screen. */

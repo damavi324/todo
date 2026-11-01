@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { useTaskStore } from '../store/useTaskStore'
 import {
@@ -37,6 +37,11 @@ export default function Settings({ onClose }) {
   const isNative = Capacitor.isNativePlatform()
   const authConfigured = isGoogleAuthReady()
   const readsPhone = isNative && settings.phoneCalendarEnabled
+  const nameTimer = useRef(null)
+  // Closing Settings mid-typing still re-schedules with the new name.
+  useEffect(() => () => {
+    if (nameTimer.current) { clearTimeout(nameTimer.current); syncReminders().catch(console.error) }
+  }, [])
 
   useEffect(() => {
     VoiceReminder.checkPermissions()
@@ -233,7 +238,12 @@ export default function Settings({ onClose }) {
               </span>
               <input
                 value={settings.userName || ''}
-                onChange={(e) => changeReminderSetting({ userName: e.target.value })}
+                onChange={(e) => {
+                  // Reminders are re-scheduled once typing pauses, not on every letter.
+                  updateSettings({ userName: e.target.value })
+                  clearTimeout(nameTimer.current)
+                  nameTimer.current = setTimeout(() => { nameTimer.current = null; syncReminders().catch(console.error) }, 800)
+                }}
                 placeholder="Your name"
                 maxLength={80}
                 className={`${fieldClass} w-full`}

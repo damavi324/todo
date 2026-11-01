@@ -77,8 +77,8 @@ export function Navigation({ onPick, large = false }) {
         <div className="flex items-center justify-between px-3 mb-1">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">Lists</span>
           <button onClick={() => setAdding(true)} aria-label="New list"
-            className="w-6 h-6 -mr-1.5 rounded-md flex items-center justify-center text-ink-3 hover:bg-surface-2 hover:text-ink">
-            <Plus size={15} />
+            className={`${large ? 'w-10 h-10 -my-2 -mr-3' : 'w-6 h-6 -mr-1.5'} rounded-md flex items-center justify-center text-ink-3 hover:bg-surface-2 hover:text-ink`}>
+            <Plus size={large ? 18 : 15} />
           </button>
         </div>
         <div className="space-y-0.5">
@@ -99,13 +99,14 @@ export function Navigation({ onPick, large = false }) {
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') setAdding(false) }}
+              enterKeyHint="done"
               placeholder="List name"
               className="w-full h-9 rounded-lg bg-surface px-3 text-sm outline-none border border-line focus:border-accent/50"
             />
             <div className="flex gap-1.5">
               {LIST_COLORS.map((c) => (
-                <button key={c} onClick={() => setColor(c)} aria-label="List color"
-                  className={`w-5 h-5 rounded-full ring-offset-2 ring-offset-surface-2 ${color === c ? 'ring-2 ring-ink-3' : ''}`}
+                <button key={c} onClick={() => setColor(c)} aria-label="List color" aria-pressed={color === c}
+                  className={`${large ? 'w-7 h-7' : 'w-5 h-5'} rounded-full ring-offset-2 ring-offset-surface-2 ${color === c ? 'ring-2 ring-ink-3' : ''}`}
                   style={{ background: c }} />
               ))}
             </div>

@@ -78,6 +78,12 @@ export const useTaskStore = create(
         tasks: s.tasks.filter((t) => t.id !== id),
       })),
 
+      // Undo a delete: the task comes back as it was, and an event from the calendar is imported again.
+      restoreTask: (task) => set((s) => (s.tasks.some((t) => t.id === task.id) ? s : {
+        tasks: [task, ...s.tasks],
+        dismissedEventIds: s.dismissedEventIds.filter((e) => e !== task.googleEventId),
+      })),
+
       toggleTask: (id) => set((s) => ({
         tasks: s.tasks.map((t) =>
           t.id === id

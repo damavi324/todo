@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
+import { useBack } from '../lib/backStack'
 
 const BUTTON = {
   primary: 'bg-accent text-accent-ink hover:bg-accent/90',
@@ -39,11 +40,8 @@ export function IconButton({ label, className = '', children, ...props }) {
  * (`side`) or a centered dialog.
  */
 export function Sheet({ title, onClose, children, footer, side = false, wide = false }) {
-  useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useBack(onClose)
+  const { panel, drag } = useSwipeDown(onClose)
 
   const desktop = side
     ? 'md:inset-y-0 md:right-0 md:left-auto md:top-0 md:w-[440px] md:max-h-none md:h-full md:rounded-none md:border-l md:border-line md:slide-in-right'
@@ -53,20 +51,58 @@ export function Sheet({ title, onClose, children, footer, side = false, wide = f
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 bg-black/30 dark:bg-black/50 fade-in" onClick={onClose} />
       <div
+        ref={panel}
         className={`absolute inset-x-0 bottom-0 max-h-[92dvh] flex flex-col bg-surface rounded-t-2xl shadow-pop slide-up ${desktop}`}
       >
-        <div className="flex items-center justify-between gap-3 px-5 h-14 border-b border-line flex-shrink-0">
+        {/* Phones: drag the top bar down to close, like any bottom sheet. */}
+        <div {...drag} className="relative flex items-center justify-between gap-3 px-5 h-14 border-b border-line flex-shrink-0 touch-none md:touch-auto">
+          <span className="md:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-9 h-1 rounded-full bg-line" aria-hidden />
           <h2 className="text-[15px] font-semibold text-ink truncate">{title}</h2>
           <IconButton label="Close" onClick={onClose} className="-mr-2">
             <X size={18} />
           </IconButton>
         </div>
-        <div className="flex-1 overflow-y-auto overscroll-contain">{children}</div>
-        {footer && <div className="flex-shrink-0 border-t border-line px-5 py-3 safe-bottom">{footer}</div>}
+        <div className={`flex-1 overflow-y-auto overscroll-contain ${footer ? '' : 'pb-safe'}`}>{children}</div>
+        {footer && <div className="flex-shrink-0 border-t border-line px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">{footer}</div>}
       </div>
     </div>,
     document.body
   )
+}
+
+/**
+ * A bottom sheet that closes when its top bar is dragged down: `panel` goes on the sheet and `drag` on its top bar.
+ * The sheet follows the finger, and letting go far enough down (or with a quick flick) calls `onClose`.
+ * Phones only; buttons in the bar still work.
+ */
+function useSwipeDown(onClose) {
+  const panel = useRef(null)
+  const start = useRef(null)
+  const move = (dy) => {
+    if (panel.current) panel.current.style.transform = dy > 0 ? `translateY(${dy}px)` : ''
+  }
+  const drag = {
+    onPointerDown: (e) => {
+      if (e.pointerType === 'mouse' || e.target.closest('button') || window.matchMedia('(min-width: 768px)').matches) return
+      start.current = { y: e.clientY, t: Date.now() }
+      e.currentTarget.setPointerCapture(e.pointerId)
+    },
+    onPointerMove: (e) => { if (start.current) move(e.clientY - start.current.y) },
+    onPointerUp: (e) => {
+      if (!start.current) return
+      const dy = e.clientY - start.current.y
+      const fast = dy > 40 && dy / Math.max(1, Date.now() - start.current.t) > 0.6
+      start.current = null
+      if (dy > 120 || fast) onClose()
+      else if (panel.current) {
+        panel.current.style.transition = 'transform 0.18s ease-out'
+        move(0)
+        setTimeout(() => { if (panel.current) panel.current.style.transition = '' }, 200)
+      }
+    },
+    onPointerCancel: () => { start.current = null; move(0) },
+  }
+  return { panel, drag }
 }
 
 export function Segmented({ value, options, onChange, size = 'md' }) {

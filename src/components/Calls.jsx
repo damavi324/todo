@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Phone, PhoneOff, Mic, MicOff, Volume2, Grid3x3, ScrollText, ChevronLeft, Sparkles, RotateCcw, Pencil,
   ListPlus, Copy, AlertTriangle, Bot, UserRound, Loader2, CalendarPlus, Clock, Check, UserPlus, Plus, Trash2,
-  BookUser, MessageCircleQuestion,
+  BookUser, MessageCircleQuestion, Settings,
 } from 'lucide-react'
-import { useCallStore, statusText, isBadStatus } from '../store/useCallStore'
+import { useCallStore, statusText, isBadStatus, withoutContact } from '../store/useCallStore'
 import { useTaskStore } from '../store/useTaskStore'
 import { formatNumber, assistantName, ownerName, isCallPilotReady } from '../lib/callpilot'
 import { startDictation, listenUntilPause } from '../lib/dictation'
@@ -14,6 +14,8 @@ import { loadPhoneContacts, phoneContacts, mergeContacts, pickByName } from '../
 import { formatDue } from '../lib/dates'
 import { addAppointment, addFollowUp, callWith, contactFor, scheduleCallback, callbackTime } from '../lib/callFollowUps'
 import { Button, IconButton, Note, Segmented, Sheet, fieldClass } from './ui'
+
+const touchScreen = () => window.matchMedia('(pointer: coarse)').matches
 
 // ---------- small building blocks ----------
 function Card({ className = '', children }) {
@@ -123,7 +125,8 @@ function Countdown({ label, seconds = HANDS_FREE_SECONDS, onDone, onCancel }) {
 }
 function callText(draft) {
   const goal = (draft?.goal || '').trim()
-  const brief = (draft?.brief || '').trim()
+  // A saved contact's details were added for the assistant; they're added again on the next call.
+  const brief = withoutContact(draft?.brief, draft?.to).trim()
   if (!goal) return brief
   if (!brief || brief === goal) return goal
   if (brief.startsWith(goal)) return brief
@@ -166,11 +169,13 @@ function Compose() {
   const query = to.trim().toLowerCase()
   const typedDigits = query.replace(/\D/g, '')
   // Search by name, or by part of the number; with an empty field, show your saved contacts first.
-  const matches = /[a-z]/i.test(query)
-    ? everyone.filter((c) => c.name.toLowerCase().includes(query)).slice(0, 8)
-    : typedDigits.length >= 3 && !contact
-      ? everyone.filter((c) => c.phone.replace(/\D/g, '').includes(typedDigits)).slice(0, 5)
-      : picking && !query ? everyone.slice(0, 8) : []
+  // Only while the field is in use: leaving it closes the list, so it can't cover the fields below.
+  const matches = !picking ? []
+    : /[a-z]/i.test(query)
+      ? everyone.filter((c) => c.name.toLowerCase().includes(query)).slice(0, 8)
+      : typedDigits.length >= 3 && !contact
+        ? everyone.filter((c) => c.phone.replace(/\D/g, '').includes(typedDigits)).slice(0, 5)
+        : !query ? everyone.slice(0, 8) : []
 
   // A contact's name typed in full (without tapping the suggestion) still means their number.
   const resolveTo = (value) => {
@@ -287,11 +292,16 @@ function Compose() {
           <span className="block text-sm font-medium text-ink mb-1.5">Who to call</span>
           {/* A full keyboard, not the number pad, so you can search contacts by name. */}
           <input type="text" autoComplete="off" autoCorrect="off" autoCapitalize="words" spellCheck={false} value={to} required
-            onChange={(e) => setTo(e.target.value)}
-            onFocus={() => setPicking(true)}
+            onChange={(e) => { setTo(e.target.value); setPicking(true) }}
+            onFocus={(e) => {
+              setPicking(true)
+              // Phones: bring the field to the top, so its suggestions aren't hidden under the keyboard.
+              const field = e.currentTarget
+              if (touchScreen()) setTimeout(() => field.scrollIntoView({ block: 'start', behavior: 'smooth' }), 300)
+            }}
             onBlur={() => setTimeout(() => setPicking(false), 150)}
             placeholder={everyone.length ? 'Search contacts, or type a number' : '(214) 555-0123'}
-            className={`${fieldClass} w-full h-11 text-base tabular-nums`} />
+            enterKeyHint="next" className={`${fieldClass} w-full h-11 text-base tabular-nums scroll-mt-4`} />
           {contact && <p className="text-xs text-ink-3 mt-1.5 px-1">{contact.name}{contact.notes ? ' · their notes are included' : ''}</p>}
           {matches.length > 0 && (
             <div className="absolute z-10 inset-x-0 mt-1 bg-surface rounded-lg shadow-pop py-1 max-h-80 overflow-y-auto">
@@ -458,8 +468,9 @@ function QuestionCard({ question, answer }) {
         <MessageCircleQuestion size={15} />{assistantName()} needs your answer · they’re on hold
       </p>
       <p className="text-[15px] font-medium text-ink leading-snug">{question.question}</p>
-      <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Type your answer"
-        className={`${fieldClass} w-full h-10`} />
+      {/* Hands-free: no keyboard popping up over the Speak button. */}
+      <input autoFocus={!useCallStore.getState().handsFree} value={text} onChange={(e) => setText(e.target.value)}
+        placeholder="Type your answer" enterKeyHint="send" className={`${fieldClass} w-full h-10`} />
       <div className="flex gap-2">
         <Button size="sm" onClick={speak} aria-pressed={!!listening}
           className={listening ? '!bg-danger !text-white animate-pulse' : ''}>
@@ -808,6 +819,7 @@ function ContactEditor({ contact, onClose }) {
   const [name, setName] = useState(contact.name || '')
   const [phone, setPhone] = useState(contact.phone ? formatNumber(contact.phone) || contact.phone : '')
   const [notes, setNotes] = useState(contact.notes || '')
+  const [confirming, setConfirming] = useState(false)
   const save = () => {
     if (!name.trim() || !phone.trim()) return
     const data = { name: name.trim(), phone: phone.trim(), notes: notes.trim() }
@@ -819,7 +831,9 @@ function ContactEditor({ contact, onClose }) {
     <Sheet title={isEdit ? 'Edit contact' : 'New contact'} onClose={onClose}
       footer={
         <div className="flex items-center gap-2">
-          {isEdit && <Button variant="danger" size="sm" className="-ml-2" onClick={() => { removeContact(contact.id); onClose() }}><Trash2 size={15} />Delete</Button>}
+          {isEdit && (confirming
+            ? <Button variant="danger" size="sm" className="-ml-2" onClick={() => { removeContact(contact.id); onClose() }}><Trash2 size={15} />Really delete</Button>
+            : <Button variant="danger" size="sm" className="-ml-2" onClick={() => setConfirming(true)}><Trash2 size={15} />Delete</Button>)}
           <div className="flex-1" />
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
           <Button variant="primary" size="sm" onClick={save} disabled={!name.trim() || !phone.trim()}>Save</Button>
@@ -828,7 +842,7 @@ function ContactEditor({ contact, onClose }) {
       <div className="p-5 space-y-4">
         <label className="block">
           <span className="block text-sm font-medium text-ink mb-1.5">Name</span>
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Bright Smiles Dental" className={`${fieldClass} w-full`} />
+          <input autoFocus={!isEdit} value={name} onChange={(e) => setName(e.target.value)} placeholder="Bright Smiles Dental" className={`${fieldClass} w-full`} />
         </label>
         <label className="block">
           <span className="block text-sm font-medium text-ink mb-1.5">Phone</span>
@@ -908,6 +922,9 @@ export default function Calls({ onOpenSettings }) {
   const problems = useTaskStore((st) => st.settings.callpilotProblems) || []
   useEffect(() => { if (ready) loadHistory() }, [ready, loadHistory])
   const onCall = session && status && status !== 'ended' && !isBadStatus(status)
+  // A new screen (a plan, a call's details, a form filled from a contact) starts at the top, where it begins.
+  const scroller = useRef(null)
+  useEffect(() => { if (scroller.current) scroller.current.scrollTop = 0 }, [view, draftVersion])
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -921,15 +938,18 @@ export default function Calls({ onOpenSettings }) {
             <Button variant="primary" size="sm" onClick={newCall} className="mb-1"><Plus size={15} />New call</Button>
           )}
           {ready && (
-            <IconButton label="Server logs" onClick={openLogs} className="relative mb-0.5 -mr-2">
+            <IconButton label="Server logs" onClick={openLogs} className="relative mb-0.5 md:-mr-2">
               <ScrollText size={18} />
               {unseenProblems > 0 && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger" />}
             </IconButton>
           )}
+          <IconButton label="Settings" onClick={onOpenSettings} className="md:hidden -mr-2 mb-0.5">
+            <Settings size={20} />
+          </IconButton>
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto">
+      <div ref={scroller} className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto w-full px-3 md:px-10 pb-36 md:pb-16">
           {!ready ? (
             <Card className="p-8 text-center">

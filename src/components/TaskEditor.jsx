@@ -4,7 +4,7 @@ import { useTaskStore } from '../store/useTaskStore'
 import { saveTask } from '../lib/saveTask'
 import { dueDateTime } from '../lib/dates'
 import { isReminder } from '../lib/taskKind'
-import { removeTask } from '../lib/taskActions'
+import { deleteWithUndo } from '../lib/taskActions'
 import { formatNumber, assistantName } from '../lib/callpilot'
 import { PRIORITY_COLOR } from '../lib/views'
 import { Button, Note, Segmented, Sheet, fieldClass } from './ui'
@@ -71,9 +71,9 @@ export default function TaskEditor({ onClose, editTask, draft }) {
     }
   }
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     onClose()
-    await removeTask(editTask)
+    deleteWithUndo(editTask).catch(console.error)
   }
 
   return (
@@ -103,6 +103,7 @@ export default function TaskEditor({ onClose, editTask, draft }) {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+            enterKeyHint="done"
             placeholder="What needs doing?"
             className="w-full bg-transparent text-lg font-medium text-ink outline-none"
           />
