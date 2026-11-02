@@ -103,15 +103,9 @@ Browser (Twilio Voice SDK)                Twilio                     This server
 
 ## Run it in the cloud (no PC needed)
 
-The repo includes a `Dockerfile` and `render.yaml`.
+The server runs on Google Cloud Run, built from `Dockerfile` and redeployed from `main` on every push. Setup is in [DEPLOY-CLOUD-RUN.md](DEPLOY-CLOUD-RUN.md). It works out its own public address and points your Twilio TwiML App at itself on every start.
 
-1. Put this folder in a GitHub repo.
-2. On [render.com](https://render.com): **New → Blueprint**, pick the repo. Render reads `render.yaml`.
-3. Fill in the secrets it asks for (same values as your `.env`). The blueprint uses the **free** plan: it sleeps after ~15 idle minutes, and the phone app wakes it when you open it (30–60 s). Calls in progress keep it awake, and the app keeps its own copy of every call, so the server forgetting its history while asleep doesn't matter. For always-on with no wait, switch to **Starter** (~$7/month) in Render's settings.
-4. Deploy. The server detects its Render address and points your Twilio TwiML App at itself on every start.
-5. In the phone app: Settings → Calling → `https://<your-service>.onrender.com` + your passcode.
-
-Railway and Fly.io work too (the Dockerfile is generic; the public host name is detected from their environment variables).
+In the phone app: Settings → Calling → the `https://callpilot-….run.app` address + your passcode.
 
 ## Phone app
 

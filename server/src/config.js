@@ -14,8 +14,8 @@ const clean = (v) => (v || '').trim();
 export const config = {
   root,
   port: Number(e.PORT || 5050),
-  // Render/Railway/Fly provide the public host name; on Google Cloud Run it's worked out at startup (server.js).
-  publicHost: (clean(e.PUBLIC_HOST) || clean(e.RENDER_EXTERNAL_HOSTNAME) || clean(e.RAILWAY_PUBLIC_DOMAIN) || (clean(e.FLY_APP_NAME) ? `${clean(e.FLY_APP_NAME)}.fly.dev` : '')).replace(/^https?:\/\//, '').replace(/\/+$/, ''),
+  // On Google Cloud Run the public host name is worked out at startup (server.js); set PUBLIC_HOST for a custom domain.
+  publicHost: clean(e.PUBLIC_HOST).replace(/^https?:\/\//, '').replace(/\/+$/, ''),
   passcode: clean(e.APP_PASSCODE),
   // Only used when the app sends no name (the name in the app's Settings always wins).
   ownerName: clean(e.OWNER_NAME) || 'my client',
