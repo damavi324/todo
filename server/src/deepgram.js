@@ -86,18 +86,59 @@ export function deepgramProvider(model) {
   return p;
 }
 
+// A number from an env value, clamped to [lo, hi]; def when unset or not a number.
+const num = (v, lo, hi, def) => {
+  const n = Number(v);
+  return Number.isFinite(n) && v !== '' && v != null ? Math.min(hi, Math.max(lo, n)) : def;
+};
+
+/**
+ * The agent's ears. With Flux, turn-taking is tuned for a phone call: an early "they're probably done"
+ * signal lets Claude start drafting while the confirmation arrives (speculative replies), and a turn
+ * ends after 3 s even if the speaker trails off.
+ */
+export function listenProvider(model, override = {}) {
+  const p = deepgramProvider(model);
+  if (!model.startsWith('flux')) return p;
+  const d = { ...config.deepgram, ...override };
+  const eot = num(d.agentEotThreshold, 0.5, 1, 0.7);
+  if (d.agentEotThreshold) p.eot_threshold = eot;
+  if (String(d.agentEagerEot).toLowerCase() !== 'off') p.eager_eot_threshold = Math.min(eot, num(d.agentEagerEot, 0.3, 0.9, 0.5));
+  p.eot_timeout_ms = Math.round(num(d.agentEotTimeoutMs, 500, 10000, 3000));
+  return p;
+}
+
+// Claude models Deepgram runs itself (billed in its per-minute rate). Any other model goes through our Anthropic key.
+const MANAGED_CLAUDE = new Set(['claude-haiku-4-5', 'claude-3-5-haiku-latest', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5']);
+
+/** True when the agent's Claude calls go through our own Anthropic key instead of Deepgram's managed models. */
+export function thinkUsesOwnKey(d = config.deepgram) {
+  if (d.agentThinkEndpoint === 'anthropic') return true;
+  if (d.agentThinkEndpoint === 'deepgram') return false;
+  return !MANAGED_CLAUDE.has(d.agentThinkModel);
+}
+
+/** The think provider (and, for our own key, the endpoint) for the voice agent's Settings. */
+export function thinkConfig(override = {}) {
+  const d = { ...config.deepgram, ...override };
+  const think = { provider: { type: 'anthropic', model: d.agentThinkModel } };
+  if (thinkUsesOwnKey(d)) {
+    think.endpoint = {
+      url: `${config.anthropic.baseUrl}/v1/messages`,
+      headers: { 'x-api-key': config.anthropic.apiKey, 'anthropic-version': '2023-06-01' },
+    };
+  }
+  return think;
+}
+
 /**
  * The agent's voice. Flux voices get speed + expressivity (more animated delivery).
  * Cartesia (managed by Deepgram) falls back to a Flux voice if it ever fails.
  */
 export function speakConfig(override = {}) {
   const d = { ...config.deepgram, ...override };
-  const num = (v, lo, hi, def) => {
-    const n = Number(v);
-    return Number.isFinite(n) && v !== '' && v != null ? Math.min(hi, Math.max(lo, n)) : def;
-  };
-  const voice = d.agentVoice || 'flux-alexis-en';
-  const fluxVoice = voice.startsWith('flux') ? voice : 'flux-cliff-en';
+  const voice = d.agentVoice || 'flux-miles-en';
+  const fluxVoice = voice.startsWith('flux') ? voice : 'flux-miles-en';
   const flux = {
     provider: {
       type: 'deepgram', version: 'v2', model: fluxVoice,

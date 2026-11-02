@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { config, publicWss } from './config.js';
-import { openLiveTranscriber, openVoiceAgent, deepgramProvider, speakConfig } from './deepgram.js';
+import { openLiveTranscriber, openVoiceAgent, listenProvider, speakConfig, thinkConfig } from './deepgram.js';
 import { hangupCall, updateCall, twiml, streamParams, xml } from './twilio.js';
 import { dtmfMulaw, frames } from './dtmf.js';
 import { planToPrompt } from './planner.js';
@@ -11,6 +11,8 @@ import {
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 // How long the agent holds for the owner's answer before carrying on without it.
 const OWNER_ANSWER_MS = Number(process.env.OWNER_ANSWER_MS) || 90000;
+// People answer with "Hello?" before the caller talks. If nobody speaks this long after pickup, the agent opens anyway.
+const HELLO_WAIT_MS = Number(process.env.AGENT_HELLO_WAIT_MS) || 2000;
 
 // =====================================================================
 // Copilot stream: Twilio <Start><Stream track="both_tracks"> -> two live
@@ -77,16 +79,24 @@ function agentPrompt(s) {
     s.skills?.length ? `${owner.toUpperCase()}'S SKILLS (follow these on every call):\n${s.skills.map((x) => `- ${x}`).join('\n')}\n` : '',
     `THIS CALL, IN ${owner.toUpperCase()}'S WORDS (reference only; the plan above takes priority): ${(s.brief || s.goal || '(none)').slice(0, s.plan ? 5000 : 9000)}`,
     '',
+    'YOUR FIRST LINE',
+    `- The call has just been answered. When they first speak (usually "Hello?"), your reply is exactly this, word for word: "${greetingOf(s)}"`,
+    '- If you already said that line, do not say it again; carry on from where the conversation is. If it is a voicemail greeting, follow the voicemail rule below instead.',
+    '',
     'HOW TO TALK (you are on the phone; sound like a relaxed, friendly person, not a script)',
-    '- Keep each turn SHORT: usually one sentence, at most two. Ask one thing at a time, then stop and let them answer.',
-    '- Lead with a quick, natural reaction before the substance: "Oh, perfect.", "Got it.", "Okay, sure.", "Hmm, okay."',
-    '- Use contractions and everyday words (I\'m, that\'s, we\'d). Say times and dates the way people do: "ten a.m. Wednesday", "the fourth".',
-    '- Now and then, at most once every few turns, a light filler is fine: "um", "so", "let\'s see", "oh". Never put fillers inside names, numbers, or confirmations.',
+    '- Keep each turn SHORT: usually one sentence, at most two, under about 20 words. Ask one thing at a time, then stop and let them answer.',
+    '- A quick reaction is fine when it fits ("oh, great", "okay", "sure, that works"), but vary it and often skip it. Never start two turns the same way.',
+    '- Do not repeat back what they just said, except when you confirm the final details.',
+    '- Use contractions and everyday words (I\'m, that\'s, we\'d). Write numbers the way people say them: "ten a.m. Wednesday", "the fourth", "about forty dollars".',
+    '- Read phone, account, and confirmation numbers in small groups separated by periods, like "555. 867. 5309".',
+    '- Do not write filler words like "um" or "uh".',
+    '- If you did not catch something, say so simply: "Sorry, I missed that. Was it the fourth or the fifth?"',
+    '- If they say "hold on" or "one sec", say "Sure, take your time." and wait.',
     '- Do not over-apologize or over-explain. One "sorry about that" is plenty.',
     '- No lists, no markdown, no emojis, no stage directions.',
     '- This is a live conversation. Respond to what they actually said; the plan is guidance, not lines to recite. If they offer something new, use judgment within your limits.',
-    `- Your first line already said you are an AI assistant calling for ${owner}. If asked again whether you are an AI, say yes, plainly. Never claim to be human.`,
-    greetingOf(s).includes('transcribed') ? '' : '- Your first line did not mention transcription. Right after they first answer, say "Just so you know, this call is being transcribed." and then go straight into why you are calling.',
+    `- Your first line says you are an AI assistant calling for ${owner}. If asked again whether you are an AI, say yes, plainly. Never claim to be human.`,
+    greetingOf(s).includes('transcribed') ? '' : '- Your first line does not mention transcription. In your next turn, say "Just so you know, this call is being transcribed." and then go straight into why you are calling.',
     '',
     'WHO YOU ARE CALLING',
     `- If the goal or details name a specific person ${owner} already knows, this is a personal call. Do not ask "what's your name?" You already know who they are. If a different person answers, ask to speak to the person you called.`,
@@ -129,13 +139,14 @@ function agentSettings(s) {
     },
     agent: {
       language: 'en',
-      listen: { provider: deepgramProvider(d.agentListenModel) },
+      listen: { provider: listenProvider(d.agentListenModel) },
       think: {
-        provider: { type: 'anthropic', model: d.agentThinkModel },
+        ...thinkConfig(),
         prompt: agentPrompt(s),
         functions: [
           {
             name: 'ask_owner',
+            defer_until_eot: true,
             description: `Ask ${s.ownerName || config.ownerName} a question in real time and wait for the answer. Use when you need information or a decision you do not have.`,
             parameters: {
               type: 'object',
@@ -145,6 +156,7 @@ function agentSettings(s) {
           },
           {
             name: 'press_digits',
+            defer_until_eot: true,
             description: 'Press keys on the phone keypad to navigate an automated menu. Use digits 0-9, * and #. Use w for a half-second pause.',
             parameters: {
               type: 'object',
@@ -154,6 +166,7 @@ function agentSettings(s) {
           },
           {
             name: 'finish_call',
+            defer_until_eot: true,
             description: 'Hang up. Call this only after you have said goodbye.',
             parameters: {
               type: 'object',
@@ -166,8 +179,8 @@ function agentSettings(s) {
           },
         ],
       },
+      // No greeting: the first line is spoken after they say hello (see the prompt and the hello timer).
       speak: speakConfig(),
-      greeting: greetingOf(s),
     },
   };
 }
@@ -180,6 +193,8 @@ export function handleAgentStream(twilioWs) {
   const pendingAudio = [];
   let hangupRequested = false;
   let keepAlive = null;
+  let helloTimer = null;
+  let theySpoke = false;
 
   const sendTwilio = (obj) => {
     if (twilioWs.readyState === WebSocket.OPEN) twilioWs.send(JSON.stringify(obj));
@@ -267,11 +282,17 @@ export function handleAgentStream(twilioWs) {
           for (const chunk of pendingAudio.splice(0)) sendAgent(chunk);
           setStatus(session, 'live');
           emit(session, 'agent_state', { state: 'talking' });
+          // Nobody said hello: open the call ourselves.
+          helloTimer = setTimeout(() => {
+            if (!theySpoke) sendAgent({ type: 'InjectAgentMessage', message: greetingOf(session) });
+          }, HELLO_WAIT_MS);
           break;
         case 'ConversationText':
           addLine(session, msg.role === 'assistant' ? 'agent' : 'them', msg.content);
           break;
         case 'UserStartedSpeaking':
+          theySpoke = true;
+          clearTimeout(helloTimer);
           sendTwilio({ event: 'clear', streamSid }); // barge-in: drop queued agent audio
           break;
         case 'AgentThinking':
@@ -297,6 +318,7 @@ export function handleAgentStream(twilioWs) {
     });
     agentWs.on('close', (code, reason) => {
       clearInterval(keepAlive);
+      clearTimeout(helloTimer);
       (code === 1000 || code === 1005 ? log : console.warn)(`[agent] Deepgram connection closed (${code}${reason?.length ? ` ${reason}` : ''})`);
     });
   }
