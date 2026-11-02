@@ -1,0 +1,38 @@
+# Builds the web app and publishes it to Firebase Hosting (https://todo-88bb6.web.app) on every push to main.
+# The Firebase web settings come from the repository's Actions variables (they identify the project; they are
+# not secrets). The deploy uses the FIREBASE_SERVICE_ACCOUNT_TODO_88BB6 secret, made by
+# `npx firebase-tools init hosting:github`.
+name: Deploy web
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'server/**', 'android/**', 'render.yaml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-web
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TODO_88BB6 }}
+          projectId: todo-88bb6
+          channelId: live
