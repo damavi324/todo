@@ -118,3 +118,7 @@ textarea::placeholder {
 @media (prefers-reduced-motion: reduce) {
   .task-enter, .slide-up, .slide-in-right, .fade-in { animation: none; }
 }
+
+/* A row that scrolls sideways (filter chips) without showing a scrollbar. */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

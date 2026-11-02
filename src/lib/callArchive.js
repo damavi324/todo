@@ -25,12 +25,31 @@ function write(key, value) {
 
 const isFinished = (c) => !!c && (!!c.endedAt || ['ended', 'failed', 'busy', 'no-answer', 'canceled'].includes(c.status))
 
+/**
+ * How a call went: live, answered, voicemail, no_answer, busy, canceled or failed. The server sends this
+ * with each call; this works it out for calls saved before it did (same rules as the server).
+ */
+export function callResult(c) {
+  if (c.result) return c.result
+  if (!isFinished(c)) return 'live'
+  const outcome = c.outcome ?? c.summary?.outcome
+  if (c.voicemail || outcome === 'voicemail') return 'voicemail'
+  if (c.status === 'busy') return 'busy'
+  if (c.status === 'no-answer' || outcome === 'no_answer') return 'no_answer'
+  if (c.status === 'canceled') return 'canceled'
+  if (c.status === 'failed' || c.error) return 'failed'
+  if (c.answered || c.transcript?.some((l) => l.speaker === 'them') || (outcome && outcome !== 'no_conversation')) return 'answered'
+  return 'no_answer'
+}
+
 /** Same light shape as the server's list, so the History screen can show either. */
 export function toListItem(c) {
   return {
     id: c.id, mode: c.mode, to: c.to, goal: c.goal, status: c.status, startedAt: c.startedAt, endedAt: c.endedAt,
     error: c.error || null, outcome: c.outcome ?? c.summary?.outcome ?? null, headline: c.headline ?? c.summary?.headline ?? null,
     hasPlan: c.hasPlan ?? !!c.plan, briefChars: c.briefChars ?? (c.brief || '').length,
+    result: callResult(c),
+    usage: c.usage || null,
   }
 }
 

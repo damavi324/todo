@@ -27,6 +27,8 @@ const SHARED_SETTINGS = [
   'voiceRemindersEnabled',
   'userName',
   'callerAbout',
+  'useSkills',
+  'callSkills',
   'googleCalendarId',
   'callpilotUrl',
   'callpilotToken',

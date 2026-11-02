@@ -9,10 +9,11 @@ import { voiceAccessToken, createCall, hangupCall, toE164, twiml, streamParams, 
 import {
   broadcast,
   addUiClient, createSession, getSession, findByCallSid, publicView, setStatus, emit, finalize,
-  answerQuestion, runSuggestion, history, historyList, callRecord, slog,
+  answerQuestion, runSuggestion, history, historyList, callRecord, slog, markVoicemail,
 } from './sessions.js';
 import { handleListenStream, handleAgentStream, joinAgentCall } from './streams.js';
-import { generatePlan, normalizePlan } from './planner.js';
+import { generatePlan, normalizePlan, cleanSkills } from './planner.js';
+import { accountUsage } from './usage.js';
 import { interpret } from './assistant.js';
 import { ensureTwimlApp, validTwilioSignature } from './twilio.js';
 import { openLiveTranscriber } from './deepgram.js';
@@ -122,6 +123,15 @@ function serveStatic(req, res, pathname) {
   fs.createReadStream(file).pipe(res);
 }
 
+/** Notes the caller ID the other phone will see, and warns about calling the number the call comes from. */
+function logCallerId(s, to) {
+  const from = config.twilio.callerId;
+  slog(s, 'info', `Calling ${to} from caller ID ${from}`);
+  if (toE164(from) === to) {
+    slog(s, 'warn', `You are calling the same number the call shows as coming from (${from}). Phone carriers send a call from your own number straight to voicemail. Call a different phone, or set TWILIO_CALLER_ID to another number.`);
+  }
+}
+
 // ---------- TwiML for an in-app (browser) call ----------
 function outgoingTwiml(params) {
   const to = toE164(params.To);
@@ -129,6 +139,7 @@ function outgoingTwiml(params) {
   if (!to) return `<Say>Sorry, that number is not valid.</Say>`;
   if (session) {
     session.callSid = params.CallSid || session.callSid;
+    logCallerId(session, to);
     setStatus(session, 'ringing');
   }
   const stream = session
@@ -136,7 +147,9 @@ function outgoingTwiml(params) {
     : '';
   const action = session ? ` action="${xml(publicUrl(`/twilio/dial-done?sessionId=${session.id}`))}"` : '';
   const numberCb = session
-    ? ` statusCallbackEvent="answered completed" statusCallback="${xml(publicUrl(`/twilio/status?sessionId=${session.id}`))}" statusCallbackMethod="POST"`
+    ? ` statusCallbackEvent="answered completed" statusCallback="${xml(publicUrl(`/twilio/status?sessionId=${session.id}`))}" statusCallbackMethod="POST"` +
+      // Tell us (without holding up the call) whether a person or voicemail picked up.
+      ` machineDetection="Enable" amdStatusCallback="${xml(publicUrl(`/twilio/amd?sessionId=${session.id}`))}" amdStatusCallbackMethod="POST"`
     : '';
   return `${stream}<Dial callerId="${xml(config.twilio.callerId)}" answerOnBridge="true" timeLimit="${config.maxCallMinutes * 60}"${action}><Number${numberCb}>${xml(to)}</Number></Dial>`;
 }
@@ -180,6 +193,7 @@ async function route(req, res) {
     if (s) {
       const bad = params.DialCallStatus && params.DialCallStatus !== 'completed';
       slog(s, bad ? 'warn' : 'info', `Twilio dial finished: ${params.DialCallStatus}${params.ErrorCode ? ` error ${params.ErrorCode}` : ''}${params.ErrorMessage ? ` ${params.ErrorMessage}` : ''}${params.DialSipResponseCode ? ` SIP ${params.DialSipResponseCode}` : ''}${bad ? '  (see https://www.twilio.com/docs/api/errors' + (params.ErrorCode ? '/' + params.ErrorCode : '') + ')' : ''}`);
+      if (params.DialCallDuration) s.usage.seconds = Math.max(s.usage.seconds, Number(params.DialCallDuration) || 0);
       if (bad) s.error = `${params.DialCallStatus}${params.ErrorCode ? ` (Twilio error ${params.ErrorCode})` : ''}`;
       if (bad) setStatus(s, params.DialCallStatus);
       finalize(s, params.DialCallStatus || 'completed');
@@ -193,14 +207,25 @@ async function route(req, res) {
       const bad = ['busy', 'no-answer', 'failed', 'canceled'].includes(params.CallStatus);
       if (bad && params.ErrorCode) s.error = `${params.CallStatus} (Twilio error ${params.ErrorCode})`;
       slog(s, bad ? 'warn' : 'info', `Twilio call ${params.CallSid}: ${params.CallStatus}${params.ErrorCode ? ` error ${params.ErrorCode}` : ''}${params.ErrorMessage ? ` ${params.ErrorMessage}` : ''}${params.SipResponseCode ? ` SIP ${params.SipResponseCode}` : ''}${params.CallDuration ? ` (${params.CallDuration}s)` : ''}`);
+      if (params.CallDuration) s.usage.seconds = Math.max(s.usage.seconds, Number(params.CallDuration) || 0);
       if (ENDED.has(params.CallStatus)) {
         if (params.CallStatus !== 'completed') setStatus(s, params.CallStatus);
         finalize(s, params.CallStatus);
       } else if (params.CallStatus === 'in-progress' || params.CallStatus === 'answered') {
+        s.answered = true;
         setStatus(s, 'live');
       } else {
         setStatus(s, params.CallStatus);
       }
+    }
+    return send(res, 204, '', 'text/plain');
+  }
+  if (p === '/twilio/amd') {
+    const params = req.twilioBody;
+    const s = getSession(url.searchParams.get('sessionId')) || findByCallSid(params.CallSid);
+    if (s && params.AnsweredBy) {
+      slog(s, 'info', `Twilio says the call was answered by: ${params.AnsweredBy}`);
+      if (/^(machine|fax)/.test(params.AnsweredBy)) markVoicemail(s, params.AnsweredBy === 'fax' ? 'A fax machine answered.' : 'Went to voicemail. No one picked up.');
     }
     return send(res, 204, '', 'text/plain');
   }
@@ -229,6 +254,9 @@ async function route(req, res) {
     return send(res, 401, { error: 'Wrong passcode' });
   }
   if (p.startsWith('/api/') && !isAuthed(req)) return send(res, 401, { error: 'Login required' });
+  if (p === '/api/usage' && method === 'GET') {
+    return send(res, 200, await accountUsage());
+  }
 
   if (p === '/api/logs' && method === 'GET') return send(res, 200, { logs: recentLogs() });
   if (p === '/api/client-log' && method === 'POST') {
@@ -256,9 +284,10 @@ async function route(req, res) {
     const body = await readBody(req);
     try {
       log(`[assistant] heard: ${String(body.text || '').slice(0, 160)}`);
-      const result = await interpret(body);
+      const usage = {};
+      const result = await interpret(body, usage);
       log(`[assistant] understood as ${result.kind}${result.task ? ` | task: ${result.task.title}` : ''}${result.call ? ` | call: ${result.call.contact || result.call.to || '?'} (${result.call.when})` : ''}`);
-      return send(res, 200, { result });
+      return send(res, 200, { result, usage });
     } catch (err) {
       console.error('[assistant] failed:', err.message);
       return send(res, 502, { error: `Could not understand that: ${err.message}` });
@@ -272,9 +301,10 @@ async function route(req, res) {
     if (!String(body.goal || '').trim()) return send(res, 400, { error: 'Tell the agent what the call is for' });
     try {
       log(`[plan] writing call plan (${String(body.brief || '').length} chars of details)`);
-      const plan = await generatePlan({ to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about });
+      const usage = {};
+      const plan = await generatePlan({ to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, skills: body.skills, usage });
       log(`[plan] ready: ${plan.objective}`);
-      return send(res, 200, { plan });
+      return send(res, 200, { plan, usage });
     } catch (err) {
       console.error('[plan] failed:', err.message);
       return send(res, 502, { error: `Could not write the call plan: ${err.message}` });
@@ -293,8 +323,9 @@ async function route(req, res) {
     body.goal = String(body.goal || '').slice(0, 2000);
     body.brief = String(body.brief || '').slice(0, 40000);
     if (mode === 'agent' && !body.goal?.trim()) return send(res, 400, { error: 'Tell the agent what the call is for' });
-    const s = createSession({ mode, to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null });
+    const s = createSession({ mode, to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage });
     if (mode === 'agent') {
+      logCallerId(s, to);
       try {
         const call = await createCall({
           To: to,
@@ -304,6 +335,12 @@ async function route(req, res) {
           StatusCallbackMethod: 'POST',
           StatusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
           TimeLimit: config.maxCallMinutes * 60,
+          // Ask Twilio whether a person or an answering machine picked up. Async, so the agent still
+          // starts talking right away; the answer arrives at /twilio/amd a few seconds in.
+          MachineDetection: 'Enable',
+          AsyncAmd: 'true',
+          AsyncAmdStatusCallback: publicUrl(`/twilio/amd?sessionId=${s.id}`),
+          AsyncAmdStatusCallbackMethod: 'POST',
         });
         s.callSid = call.sid;
         setStatus(s, 'dialing');

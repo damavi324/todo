@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Capacitor } from '@capacitor/core'
-import { useTaskStore } from '../store/useTaskStore'
+import { useTaskStore, DEFAULT_SKILLS } from '../store/useTaskStore'
 import {
   signIn,
   signOut,
@@ -18,7 +18,7 @@ import VoiceReminder from '../plugins/VoiceReminder'
 import DeviceCalendar from '../plugins/DeviceCalendar'
 import { isCloudConfigured } from '../lib/firebase'
 import { useSyncStore } from '../lib/cloudSync'
-import { LogOut, LogIn, RefreshCw, Play, Check } from 'lucide-react'
+import { LogOut, LogIn, RefreshCw, Play, Check, Plus, Trash2, RotateCcw } from 'lucide-react'
 import { Button, IconButton, Note, Sheet, Switch, fieldClass } from './ui'
 import CallingSettings from './CallingSettings'
 
@@ -266,6 +266,10 @@ export default function Settings({ onClose }) {
           </div>
         </Section>
 
+        <Section title="Call skills">
+          <CallSkills settings={settings} updateSettings={updateSettings} />
+        </Section>
+
         <Section title="Reminders">
           <Row label="Speak reminders aloud" hint={isNative ? 'Works even when the app is closed.' : 'Only while this tab is open.'}>
             <Switch
@@ -434,6 +438,54 @@ const SYNC_DOT = {
   connecting: 'bg-warn',
   offline: 'bg-ink-3',
   error: 'bg-danger',
+}
+
+/**
+ * Standing instructions the calling assistant follows on every call (how to open, what to say first...).
+ * Each can be switched off or removed; turning skills off altogether saves tokens and uses the standard call.
+ */
+function CallSkills({ settings, updateSettings }) {
+  const on = settings.useSkills !== false
+  const skills = settings.callSkills || []
+  const [draft, setDraft] = useState('')
+  const save = (next) => updateSettings({ callSkills: next })
+  const add = () => {
+    const text = draft.trim()
+    if (!text) return
+    save([...skills, { id: `s${Date.now().toString(36)}`, on: true, text }])
+    setDraft('')
+  }
+  return (
+    <>
+      <Row label="Use skills" hint={on ? 'Every AI call is planned and made with the skills below.' : 'Off: calls use the standard opening and plan, with fewer tokens.'}>
+        <Switch label="Use skills" checked={on} onChange={(v) => updateSettings({ useSkills: v })} />
+      </Row>
+      <div className={`p-4 space-y-2 ${on ? '' : 'opacity-50'}`}>
+        {skills.map((sk, i) => (
+          <div key={sk.id} className="flex items-start gap-2">
+            <input type="checkbox" checked={sk.on} disabled={!on} aria-label="Use this skill"
+              onChange={(e) => save(skills.map((x, j) => (j === i ? { ...x, on: e.target.checked } : x)))}
+              className="mt-2.5 w-4 h-4 accent-[rgb(var(--accent))] flex-shrink-0" />
+            <textarea value={sk.text} disabled={!on} rows={4} maxLength={600}
+              onChange={(e) => save(skills.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))}
+              className="flex-1 min-w-0 rounded-lg bg-surface-2 px-3 py-2 text-[13px] text-ink outline-none border border-transparent focus:border-accent/50 focus:bg-surface resize-y" />
+            <IconButton label="Remove skill" disabled={!on} onClick={() => save(skills.filter((_, j) => j !== i))} className="flex-shrink-0 hover:text-danger">
+              <Trash2 size={15} />
+            </IconButton>
+          </div>
+        ))}
+        <div className="flex items-start gap-2 pt-1">
+          <textarea value={draft} disabled={!on} rows={2} maxLength={600} placeholder="Add a skill, e.g. Always ask for a confirmation number."
+            onChange={(e) => setDraft(e.target.value)}
+            className="flex-1 min-w-0 rounded-lg bg-surface-2 px-3 py-2 text-[13px] text-ink outline-none border border-transparent focus:border-accent/50 focus:bg-surface resize-y" />
+          <IconButton label="Add skill" disabled={!on || !draft.trim()} onClick={add} className="flex-shrink-0"><Plus size={17} /></IconButton>
+        </div>
+        <button type="button" disabled={!on} onClick={() => save(DEFAULT_SKILLS)} className="inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ink disabled:pointer-events-none">
+          <RotateCcw size={12} />Restore the starting skills
+        </button>
+      </div>
+    </>
+  )
 }
 
 function Section({ title, children }) {

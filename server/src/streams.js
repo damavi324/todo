@@ -5,7 +5,7 @@ import { hangupCall, updateCall, twiml, streamParams, xml } from './twilio.js';
 import { dtmfMulaw, frames } from './dtmf.js';
 import { planToPrompt } from './planner.js';
 import {
-  getSession, setStatus, addLine, emit, utteranceAssembler, askOwner, finalize,
+  getSession, setStatus, addLine, emit, utteranceAssembler, askOwner, finalize, markVoicemail,
 } from './sessions.js';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -74,6 +74,7 @@ function agentPrompt(s) {
     s.about ? `ABOUT ${owner.toUpperCase()} (true on every call; use these facts, and do not ask the other person for them):\n${s.about}\n` : '',
     `THIS CALL: ${s.goal || 'See context.'}`,
     s.plan ? planToPrompt(s.plan, owner) : '',
+    s.skills?.length ? `${owner.toUpperCase()}'S SKILLS (follow these on every call):\n${s.skills.map((x) => `- ${x}`).join('\n')}\n` : '',
     `THIS CALL, IN ${owner.toUpperCase()}'S WORDS (reference only; the plan above takes priority): ${(s.brief || s.goal || '(none)').slice(0, s.plan ? 5000 : 9000)}`,
     '',
     'HOW TO TALK (you are on the phone; sound like a relaxed, friendly person, not a script)',
@@ -84,7 +85,8 @@ function agentPrompt(s) {
     '- Do not over-apologize or over-explain. One "sorry about that" is plenty.',
     '- No lists, no markdown, no emojis, no stage directions.',
     '- This is a live conversation. Respond to what they actually said; the plan is guidance, not lines to recite. If they offer something new, use judgment within your limits.',
-    `- You already introduced yourself as an AI assistant calling for ${owner}. If asked again whether you are an AI, say yes, plainly. Never claim to be human.`,
+    `- Your first line already said you are an AI assistant calling for ${owner}. If asked again whether you are an AI, say yes, plainly. Never claim to be human.`,
+    greetingOf(s).includes('transcribed') ? '' : '- Your first line did not mention transcription. Right after they first answer, say "Just so you know, this call is being transcribed." and then go straight into why you are calling.',
     '',
     'WHO YOU ARE CALLING',
     `- If the goal or details name a specific person ${owner} already knows, this is a personal call. Do not ask "what's your name?" You already know who they are. If a different person answers, ask to speak to the person you called.`,
@@ -99,10 +101,22 @@ function agentPrompt(s) {
     '- Never make payments, accept charges, cancel services, or sign up for anything without an explicit yes from ' + owner + ' via ask_owner.',
     '- Before ending, read back the details you actually agreed, such as the date, time, price, or confirmation number. Do not ask for a name just so you have something to read back.',
     '- If you reach an automated phone menu, listen to the options. Use press_digits to press keys, or say a short keyword if it asks you to speak. Stay silent during hold music.',
-    `- If you reach voicemail, leave one short message: who you are, that you are calling for ${owner}, the reason, and that ${owner} will follow up. Then call finish_call.`,
+    `- Voicemail: if you hear a recorded greeting ("leave a message", "after the tone", "is not available", "the mailbox", a beep), nobody is on the line. Do not talk to it as a person. Leave one short message: who you are, that you are calling for ${owner}, the reason, and that ${owner} will follow up. Then call finish_call with outcome "voicemail".`,
+    s.voicemail ? '- IMPORTANT: this call has already been detected as voicemail. Nobody is listening live.' : '',
     '- If they will not talk to an AI assistant, apologize, say ' + owner + ' will call back personally, and call finish_call.',
     '- When the goal is done or cannot be done, say a brief thank-you and goodbye FIRST, then call finish_call.',
   ].join('\n');
+}
+
+/**
+ * The agent's first line. With skills, the plan writes a short one (who it is trying to reach, why, for whom);
+ * it always says it is an AI assistant. Without skills, the standard introduction.
+ */
+export function greetingOf(s) {
+  const owner = s.ownerName || config.ownerName;
+  const g = s.plan?.greeting;
+  if (g) return /\bAI\b/.test(g) ? g : `Hi, this is ${config.assistantName}, an AI assistant. ${g.replace(/^(hi|hello)[,!.]?\s*/i, '')}`;
+  return `Hi, this is ${config.assistantName}, an AI assistant calling on behalf of ${owner}. This call is being transcribed. ${s.plan?.opening || ''}`.trim();
 }
 
 function agentSettings(s) {
@@ -153,9 +167,7 @@ function agentSettings(s) {
         ],
       },
       speak: speakConfig(),
-      greeting:
-        `Hi, this is ${config.assistantName}, an AI assistant calling on behalf of ${s.ownerName || config.ownerName}. ` +
-        `This call is being transcribed. ${s.plan?.opening || ''}`.trim(),
+      greeting: greetingOf(s),
     },
   };
 }
@@ -217,6 +229,7 @@ export function handleAgentStream(twilioWs) {
       respond(`Pressed ${digits}. Listen for the next prompt.`);
     } else if (fn.name === 'finish_call') {
       session.agentOutcome = { outcome: args.outcome, note: args.note || '' };
+      if (args.outcome === 'voicemail') markVoicemail(session);
       hangupRequested = true;
       respond('Hanging up now.');
       // Hang up once Twilio has played everything queued (mark echo), with a fallback timer.
@@ -306,6 +319,8 @@ export function handleAgentStream(twilioWs) {
       session.callSid = msg.start.callSid || session.callSid;
       session._agent = {
         say: (text) => sendAgent({ type: 'InjectAgentMessage', message: text }),
+        // Adds to the agent's instructions mid-call, without it saying anything.
+        note: (text) => sendAgent({ type: 'UpdatePrompt', prompt: text }),
         close: () => agentWs?.close(),
       };
       log('[agent] stream started', session.id);

@@ -51,7 +51,7 @@ const claudeServer = http.createServer((req, res) => {
       ? '{"outcome":"done","headline":"Cleaning moved to Tue 9am","summary":"The office moved the appointment.","key_facts":["Tue 9:00 am"],"appointments":[{"title":"Dental cleaning","date":"2026-11-03","time":"09:00"},{"title":"No date","date":"next week"}],"action_items":["Bring insurance card",{"title":"Pay the $25 fee","date":"2026-11-02"}],"callback_after":"sometime"}'
       : '```json\n{"say":["Could you do Tuesday at 9am?"],"note":"They mentioned a $25 fee"}\n```';
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ content: [{ type: 'text', text }] }));
+    res.end(JSON.stringify({ content: [{ type: 'text', text }], usage: { input_tokens: 1000, output_tokens: 200 } }));
   });
 }).listen(PORTS.claude);
 
@@ -99,6 +99,7 @@ agentServer.on('connection', (ws, req) => {
       ws.send(JSON.stringify({ type: 'SettingsApplied' }));
     } else if (msg.type === 'KeepAlive') agentLog.keepAlives++;
     else if (msg.type === 'InjectAgentMessage') agentLog.injected.push(msg.message);
+    else if (msg.type === 'UpdatePrompt') (agentLog.prompts ||= []).push(msg.prompt);
     else if (msg.type === 'FunctionCallResponse') {
       agentLog.responses.push(msg);
       if (msg.name === 'ask_owner') {
@@ -230,6 +231,10 @@ try {
   assert.match(r.text, /<Parameter name="sessionId" value="[0-9a-f-]+"\/>/);
   assert.match(r.text, /<Dial callerId="\+19405550100" answerOnBridge="true" timeLimit="1800" action="https:\/\/localhost:5591\/twilio\/dial-done\?sessionId=/);
   assert.match(r.text, /<Number statusCallbackEvent="answered completed"[^>]*>\+12145550123<\/Number>/);
+  assert.match(r.text, /<Number [^>]*machineDetection="Enable" amdStatusCallback="https:\/\/localhost:5591\/twilio\/amd\?sessionId=[^"]+" amdStatusCallbackMethod="POST">/);
+  r = await req('/twilio/outgoing', { method: 'POST', form: { To: '+19405550100', sessionId: cop.id, CallSid: 'CA_BROWSER_1' } });
+  r = await req(`/api/sessions/${cop.id}`);
+  assert.ok(r.json.call.log.some((l) => l.level === 'warn' && /same number the call shows as coming from/.test(l.text)), 'calling your own caller ID is flagged');
   pass('TwiML for in-app dialing: stream both sides, then dial with caller ID');
 
   r = await req('/twilio/outgoing', { method: 'POST', form: { To: cop.to, sessionId: cop.id }, noSign: true });
@@ -319,6 +324,8 @@ try {
   r = await req('/api/plan', { method: 'POST', body: { to: '2145550199', goal: 'Reschedule cleaning', brief: longDetails } });
   assert.equal(r.status, 200);
   const plan = r.json.plan;
+  assert.deepEqual(r.json.usage, { 'claude-sonnet-5-5': { in: 1000, out: 200, calls: 1 } }, 'the plan reports the tokens it used');
+  assert.match(claudeRequests.at(-1).json.system, /Leave greeting empty/, 'no skills: standard opening');
   assert.equal(plan.objective, 'Move the cleaning to a weekday morning next week');
   assert.equal(plan.facts_to_share.length, 1, 'empty facts dropped');
   assert.deepEqual(plan.missing_info, ['Insurance provider']);
@@ -340,6 +347,11 @@ try {
   assert.equal(create.params.get('From'), '+19405550100');
   assert.match(create.params.get('Twiml'), /<Connect><Stream url="wss:\/\/localhost:5591\/streams\/agent">/);
   assert.deepEqual(create.params.getAll('StatusCallbackEvent'), ['initiated', 'ringing', 'answered', 'completed']);
+  assert.equal(create.params.get('MachineDetection'), 'Enable');
+  r = await req(`/api/sessions/${ag.id}`);
+  assert.ok(r.json.call.log.some((l) => l.text === 'Calling +12145550199 from caller ID +19405550100'), 'the caller ID is logged');
+  assert.equal(create.params.get('AsyncAmd'), 'true');
+  assert.equal(create.params.get('AsyncAmdStatusCallback'), `https://localhost:5591/twilio/amd?sessionId=${ag.id}`);
   assert.equal(create.auth, 'Basic ' + Buffer.from('AC_TEST:tok').toString('base64'));
   pass('Agent mode places the call via Twilio REST with a bidirectional stream');
 
@@ -452,6 +464,48 @@ try {
   assert.match(agentLog.settings.agent.think.prompt, /Check with Sam Rivera \(ask_owner\) before:/);
   assert.doesNotMatch(agentLog.settings.agent.think.prompt, /Check with Mk\b/);
   pass('Your profile name reaches the call plan, the greeting and the agent’s instructions');
+
+  // Skills: the planner and the agent get them, the plan's short first line is used, and it always says "AI".
+  const skills = ['Open with: Hi, I am trying to reach <person> regarding <reason>, on behalf of <my name>.', 'Then say the call is transcribed.'];
+  claudeRequests.length = 0;
+  r = await req('/api/plan', { method: 'POST', body: { to: '2145550199', goal: 'Dinner Friday', brief: 'Calling: John', owner: 'Mr. Manoj Khanal', skills } });
+  assert.match(claudeRequests.at(-1).json.system, /MR\. MANOJ KHANAL'S SKILLS[^]*- Open with: Hi, I am trying to reach/);
+  const skillPlan = { ...plan, greeting: 'Hi, I am trying to reach John regarding dinner on Friday, on behalf of Mr. Manoj Khanal.' };
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550144', goal: 'Dinner Friday', plan: skillPlan, owner: 'Mr. Manoj Khanal', skills, planUsage: { 'claude-sonnet-5-5': { in: 1000, out: 200, calls: 1 }, 'bad model!': { in: 5 } } } });
+  const ag4 = r.json.session;
+  assert.deepEqual(ag4.usage.claude, { 'claude-sonnet-5-5': { in: 1000, out: 200, calls: 1 } }, 'plan tokens are kept with the call; junk dropped');
+  const tw4 = new WebSocket(`ws://localhost:${PORTS.app}/streams/agent`);
+  await new Promise((res) => tw4.on('open', res));
+  agentLog.settings = null;
+  tw4.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_4', callSid: ag4.callSid, customParameters: { sessionId: ag4.id } } }));
+  await waitFor(() => agentLog.settings, 'skills agent settings');
+  assert.equal(agentLog.settings.agent.greeting, 'Hi, this is Pilot, an AI assistant. I am trying to reach John regarding dinner on Friday, on behalf of Mr. Manoj Khanal.');
+  assert.match(agentLog.settings.agent.think.prompt, /SKILLS \(follow these on every call\):\n- Open with/);
+  assert.match(agentLog.settings.agent.think.prompt, /Just so you know, this call is being transcribed/);
+  tw4.close();
+  pass('Call skills: planner and agent follow them, the first line is short and always says it is an AI');
+
+  r = await req('/api/usage');
+  assert.equal(r.status, 200);
+  assert.ok('twilio' in r.json && 'deepgram' in r.json && r.json.models.smart === 'claude-sonnet-5-5');
+  pass('Usage page: provider balances come back (or each provider\'s error)');
+
+  // Twilio says a machine answered: the agent is told, the transcript says so, and the notes say voicemail.
+  await req(`/twilio/amd?sessionId=${ag3.id}`, { method: 'POST', form: { CallSid: ag3.callSid, AnsweredBy: 'machine_start' } });
+  await waitFor(() => agentLog.prompts?.some((x) => /answered by voicemail/.test(x)), 'voicemail heads-up to the agent');
+  r = await req(`/api/sessions/${ag3.id}`);
+  assert.deepEqual(r.json.call.transcript.filter((l) => l.speaker === 'system').map((l) => l.text), ['Went to voicemail. No one picked up.']);
+  await req(`/twilio/amd?sessionId=${ag3.id}`, { method: 'POST', form: { CallSid: ag3.callSid, AnsweredBy: 'machine_end_beep' } });
+  claudeRequests.length = 0;
+  await req(`/twilio/status?sessionId=${ag3.id}`, { method: 'POST', form: { CallSid: ag3.callSid, CallStatus: 'completed' } });
+  await waitFor(() => ui.events.find((e) => e.type === 'summary' && e.sessionId === ag3.id), 'voicemail summary', 6000);
+  const vmSummary = ui.events.find((e) => e.type === 'summary' && e.sessionId === ag3.id).summary;
+  assert.equal(vmSummary.outcome, 'voicemail', 'a voicemail call is never reported as done');
+  assert.deepEqual(vmSummary.appointments, []);
+  assert.ok(claudeRequests.some((c) => /reached VOICEMAIL/.test(c.json.messages[0].content)), 'the note-writer is told it was voicemail');
+  r = await req(`/api/sessions/${ag3.id}`);
+  assert.equal(r.json.call.transcript.filter((l) => l.speaker === 'system').length, 1, 'the voicemail note is added once');
+  pass('Voicemail is detected, shown in the transcript, and the notes say voicemail');
   tw3.close();
 
   r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550155', goal: 'Ask about hours' } });

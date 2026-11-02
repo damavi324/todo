@@ -146,7 +146,7 @@ export function socketUrl(path) {
 export const assistantName = () => useTaskStore.getState().settings.callpilotAssistant || 'Pilot'
 export const ownerName = () => {
   const s = useTaskStore.getState().settings
-  return (s.userName || '').trim() || s.callpilotOwner || 'you'
+  return (s.userName || '').trim() || 'you'
 }
 /** Name and standing details sent with every call. The call screen only adds what is specific to that call. */
 export function callerContext() {
@@ -155,6 +155,7 @@ export function callerContext() {
   return {
     owner: (s.userName || '').trim(),
     about: (s.callerAbout || '').trim(),
+    skills: s.useSkills === false ? [] : (s.callSkills || []).filter((x) => x.on && x.text?.trim()).map((x) => x.text.trim()),
     // So the call notes can turn "next Tuesday at 9" into a real date.
     localNow: `${now.toLocaleDateString('en-US', { weekday: 'long' })} ${toLocalYMD(now)} ${toLocalHM(now)} ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
   }

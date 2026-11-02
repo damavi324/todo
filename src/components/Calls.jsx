@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Phone, PhoneOff, Mic, MicOff, Volume2, Grid3x3, ScrollText, ChevronLeft, Sparkles, RotateCcw, Pencil,
   ListPlus, Copy, AlertTriangle, Bot, UserRound, Loader2, CalendarPlus, Clock, Check, UserPlus, Plus, Trash2,
-  BookUser, MessageCircleQuestion, Settings,
+  BookUser, MessageCircleQuestion, Settings, Gauge,
 } from 'lucide-react'
+import UsagePanel from './UsagePanel'
 import { useCallStore, statusText, isBadStatus, withoutContact } from '../store/useCallStore'
+import { callResult } from '../lib/callArchive'
 import { useTaskStore } from '../store/useTaskStore'
 import { formatNumber, assistantName, ownerName, isCallPilotReady } from '../lib/callpilot'
 import { startDictation, listenUntilPause } from '../lib/dictation'
@@ -371,7 +373,9 @@ function PlanView() {
       <h2 className="text-lg font-semibold text-ink mt-1 leading-snug">{p.objective || 'Call plan'}</h2>
       <div className="mt-4 rounded-lg bg-surface-2 px-4 py-3">
         <p className="text-xs font-medium text-ink-3">{assistantName()} opens with</p>
-        <p className="text-sm text-ink mt-1 leading-relaxed">“Hi, this is {assistantName()}, an AI assistant calling on behalf of {ownerName()}. {p.opening}”</p>
+        <p className="text-sm text-ink mt-1 leading-relaxed">“{p.greeting
+          ? (/\bAI\b/.test(p.greeting) ? p.greeting : `Hi, this is ${assistantName()}, an AI assistant. ${p.greeting.replace(/^(hi|hello)[,!.]?\s*/i, '')}`)
+          : `Hi, this is ${assistantName()}, an AI assistant calling on behalf of ${ownerName()}. This call is being transcribed. ${p.opening || ''}`.trim()}”</p>
       </div>
       {p.missing_info?.length > 0 && (
         <Note tone="warn" className="mt-4">
@@ -427,6 +431,10 @@ function Transcript({ lines, partials = NO_PARTIALS, live = false }) {
   return (
     <div className="space-y-2.5">
       {lines.map((l, i) => {
+        // Notes about the call itself, such as "Went to voicemail", sit in the middle.
+        if (l.speaker === 'system') {
+          return <p key={i} className="flex justify-center"><span className="rounded-full bg-warn/10 text-warn text-xs font-medium px-3 py-1">{l.text}</span></p>
+        }
         const mine = l.speaker !== 'them'
         return (
           <div key={i} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
@@ -575,7 +583,7 @@ const OUTCOME = {
   needs_you: ['Needs you', 'warn'],
   failed: ['Not completed', 'danger'],
   no_answer: ['No answer', 'warn'],
-  voicemail: ['Left a voicemail', 'warn'],
+  voicemail: ['Went to voicemail', 'warn'],
   no_conversation: ['No conversation', 'warn'],
 }
 const TONE_TEXT = { success: 'text-success', warn: 'text-warn', danger: 'text-danger' }
@@ -718,13 +726,39 @@ function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })
 }
 
+// How each call went, for the list and its filters.
+const RESULT = {
+  live: ['Live', 'text-danger'],
+  answered: ['Answered', 'text-success'],
+  voicemail: ['Voicemail', 'text-warn'],
+  no_answer: ['No answer', 'text-warn'],
+  busy: ['Busy', 'text-warn'],
+  canceled: ['Canceled', 'text-ink-3'],
+  failed: ['Failed', 'text-danger'],
+}
+
 function RecentCalls() {
   const { history, openDetail, notify } = useCallStore()
+  const [filter, setFilter] = useState('all')
   if (!history.length) return <p className="text-sm text-ink-3 px-2">Your calls will show up here.</p>
+  const counts = {}
+  for (const h of history) { const r = callResult(h); counts[r] = (counts[r] || 0) + 1 }
+  const shown = (filter === 'all' ? history : history.filter((h) => callResult(h) === filter)).slice(0, 50)
+  const chip = (key, label, n) => (
+    <button key={key} onClick={() => setFilter(key)} aria-pressed={filter === key}
+      className={`flex-shrink-0 h-8 px-3 rounded-full text-[13px] font-medium transition-colors ${filter === key ? 'bg-ink text-bg' : 'bg-surface-2 text-ink-2 hover:text-ink'}`}>
+      {label} <span className="opacity-60 tabular-nums">{n}</span>
+    </button>
+  )
   return (
+    <>
+    <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 pb-2">
+      {chip('all', 'All', history.length)}
+      {Object.keys(RESULT).filter((k) => counts[k]).map((k) => chip(k, RESULT[k][0], counts[k]))}
+    </div>
     <Card className="overflow-hidden divide-y divide-line">
-      {history.slice(0, 25).map((h) => {
-        const failed = isBadStatus(h.status) || h.error || ['failed', 'no_answer'].includes(h.outcome)
+      {shown.map((h) => {
+        const [resultLabel, resultTone] = RESULT[callResult(h)] || RESULT.failed
         const Icon = h.mode === 'agent' ? Bot : UserRound
         return (
           <button key={h.id} onClick={() => openDetail(h.id).catch((e) => notify(e.message, 'error'))}
@@ -733,14 +767,16 @@ function RecentCalls() {
             <span className="flex-1 min-w-0">
               <span className="flex items-center gap-2">
                 <span className="text-sm text-ink truncate flex-1">{h.headline || h.goal || (h.mode === 'agent' ? 'Assistant call' : 'Call')}</span>
-                {failed ? <span className="text-xs font-medium text-danger">Failed</span> : h.status === 'live' ? <span className="text-xs font-medium text-danger">Live</span> : null}
+                <span className={`text-xs font-medium flex-shrink-0 ${resultTone}`}>{resultLabel}</span>
               </span>
               <span className="block text-xs text-ink-3 mt-0.5 truncate">{callWith(h)} · {when(h.startedAt)}</span>
             </span>
           </button>
         )
       })}
+      {!shown.length && <p className="text-sm text-ink-3 px-4 py-3">No calls like that yet.</p>}
     </Card>
+    </>
   )
 }
 
@@ -752,7 +788,7 @@ function Detail() {
     <div className="space-y-3">
       <button onClick={newCall} className="flex items-center gap-1 text-sm font-medium text-accent"><ChevronLeft size={16} />All calls</button>
       <Card className="p-5">
-        <p className="text-xs text-ink-3 mb-3">{callWith(c)} · {c.mode === 'agent' ? `${assistantName()} made the call` : 'You talked'} · {when(c.startedAt)}</p>
+        <p className="text-xs text-ink-3 mb-3">{callWith(c)} · {c.mode === 'agent' ? `${assistantName()} made the call` : 'You talked'} · {when(c.startedAt)} · <span className={`font-medium ${(RESULT[callResult(c)] || RESULT.failed)[1]}`}>{(RESULT[callResult(c)] || RESULT.failed)[0]}</span></p>
         <CallOutcome call={c} summary={c.summary} error={err} />
         {(c.brief || c.goal) && (
           <Block title="What you asked for">
@@ -925,6 +961,7 @@ export default function Calls({ onOpenSettings }) {
   // A new screen (a plan, a call's details, a form filled from a contact) starts at the top, where it begins.
   const scroller = useRef(null)
   useEffect(() => { if (scroller.current) scroller.current.scrollTop = 0 }, [view, draftVersion])
+  const [usageOpen, setUsageOpen] = useState(false)
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -938,6 +975,11 @@ export default function Calls({ onOpenSettings }) {
             <Button variant="primary" size="sm" onClick={newCall} className="mb-1"><Plus size={15} />New call</Button>
           )}
           {ready && (
+            <IconButton label="Usage & credits" onClick={() => setUsageOpen(true)} className="mb-0.5">
+              <Gauge size={18} />
+            </IconButton>
+          )}
+          {ready && (
             <IconButton label="Server logs" onClick={openLogs} className="relative mb-0.5 md:-mr-2">
               <ScrollText size={18} />
               {unseenProblems > 0 && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger" />}
@@ -948,6 +990,7 @@ export default function Calls({ onOpenSettings }) {
           </IconButton>
         </div>
       </header>
+      {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
 
       <div ref={scroller} className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto w-full px-3 md:px-10 pb-36 md:pb-16">
@@ -980,7 +1023,7 @@ export default function Calls({ onOpenSettings }) {
               {view === 'summary' && <Summary />}
               {view === 'detail' && <Detail />}
               {(view === 'compose' || view === 'summary') && (
-                <div className="grid gap-6 md:grid-cols-2 pt-5">
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-2 pt-5">
                   <section>
                     <h3 className="px-2 mb-1.5 text-[13px] font-semibold text-ink-2">Recent calls</h3>
                     <RecentCalls />

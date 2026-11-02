@@ -60,7 +60,7 @@ async function twilioPost(pathname, params) {
   return json;
 }
 
-async function twilioGet(pathname) {
+export async function twilioGet(pathname) {
   const t = config.twilio;
   const res = await fetch(`${t.apiBase}/2010-04-01/Accounts/${t.accountSid}${pathname}`, { headers: { Authorization: restAuthHeader() } });
   const json = await res.json().catch(() => ({}));

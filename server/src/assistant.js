@@ -45,7 +45,7 @@ function systemPrompt(owner = config.ownerName) {
 
 const s = (v, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
-export async function interpret({ text, now, timezone, weekday, lists, owner, about }) {
+export async function interpret({ text, now, timezone, weekday, lists, owner, about }, usage) {
   const spoken = s(text, 6000);
   if (!spoken) throw new Error('Nothing was heard');
   const listText = Array.isArray(lists) && lists.length
@@ -58,7 +58,7 @@ export async function interpret({ text, now, timezone, weekday, lists, owner, ab
     about ? `About ${s(owner, 80) || config.ownerName}, true on every call: ${s(about, 4000)}` : '',
     `They said: "${spoken}"`,
   ].join('\n');
-  const reply = await complete({ model: config.anthropic.fastModel, system: systemPrompt(s(owner, 80) || config.ownerName), prompt, maxTokens: 900, timeoutMs: 25000 });
+  const reply = await complete({ model: config.anthropic.fastModel, system: systemPrompt(s(owner, 80) || config.ownerName), prompt, maxTokens: 900, timeoutMs: 25000, usage });
   return normalize(parseJson(reply), spoken, lists);
 }
 

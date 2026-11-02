@@ -9,14 +9,23 @@ export const DEFAULT_LISTS = [
   { id: 'work', name: 'Work', color: '#4ECDC4' },
 ]
 
+export const DEFAULT_SKILLS = [
+  { id: 'opening', on: true, text: 'Open with one short line only: "Hi, this is <assistant name>, an AI assistant. I\'m trying to reach <the person or business> regarding <the reason, in a few words>, on behalf of <my name>." Nothing else in that first line, so people don\'t hang up.' },
+  { id: 'transcribed', on: true, text: 'Right after they answer, say "Just so you know, this call is being transcribed." Then go straight into the reason for the call.' },
+]
+
 export const DEFAULT_SETTINGS = {
   notificationStyle: 'sticky',
   notificationRepeatMinutes: 10,
   voiceRemindersEnabled: true,
   // Your profile: the name reminders greet you by and the assistant calls on behalf of, and standing facts
   // it may share on any call. Details for a single call stay on that call.
-  userName: 'MK',
+  userName: '',
   callerAbout: '',
+  // Call skills: standing instructions the assistant follows when it plans and makes a call.
+  // Turning useSkills off sends none (fewer tokens) and the call uses the standard opening.
+  useSkills: true,
+  callSkills: DEFAULT_SKILLS,
   // Empty means the phone's best voice for its language.
   voiceName: '',
   voicePitch: 1,

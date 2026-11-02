@@ -147,7 +147,7 @@ export const useCallStore = create((set, get) => ({
     }
     const s = get().session
     if (!s || ev.sessionId !== s.id) {
-      if (ev.type === 'status' || ev.type === 'summary') get().refreshHistorySoon()
+      if (ev.type === 'status' || ev.type === 'summary' || ev.type === 'result') get().refreshHistorySoon()
       return
     }
     switch (ev.type) {
@@ -277,9 +277,10 @@ export const useCallStore = create((set, get) => ({
 
   async makePlan(body) {
     await get().ensureAwake()
-    const { plan } = await cp('/api/plan', { ...callerContext(), ...withContact(body) }, { timeoutMs: 90000 })
+    const { plan, usage } = await cp('/api/plan', { ...callerContext(), ...withContact(body) }, { timeoutMs: 90000 })
     // Kept as you wrote it (Edit puts it back in the form); the contact's details are added again on dialing.
-    set({ pending: { ...body, plan }, view: 'plan' })
+    // The tokens spent writing the plan travel with the call, so the Usage page counts them.
+    set({ pending: { ...body, plan, planUsage: usage }, view: 'plan' })
     return plan
   },
 

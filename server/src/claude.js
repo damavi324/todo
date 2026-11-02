@@ -1,7 +1,16 @@
 import { config } from './config.js';
 
-/** One-shot Claude call via the Messages API. Returns the text of the reply. */
-export async function complete({ model, system, prompt, maxTokens = 400, timeoutMs = 20000 }) {
+/** Adds one reply's token counts to a running tally: { [model]: { in, out, calls } }. */
+export function addUsage(tally, model, u) {
+  if (!tally || !u) return;
+  const t = (tally[model] ||= { in: 0, out: 0, calls: 0 });
+  t.in += (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+  t.out += u.output_tokens || 0;
+  t.calls += 1;
+}
+
+/** One-shot Claude call via the Messages API. Returns the text of the reply; `usage` (optional) collects token counts. */
+export async function complete({ model, system, prompt, maxTokens = 400, timeoutMs = 20000, usage }) {
   const a = config.anthropic;
   if (!a.apiKey) throw new Error('ANTHROPIC_API_KEY is not set');
   const ctrl = new AbortController();
@@ -24,6 +33,7 @@ export async function complete({ model, system, prompt, maxTokens = 400, timeout
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(`Claude ${res.status}: ${json?.error?.message || 'request failed'}`);
+    addUsage(usage, model, json.usage);
     return (json.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   } finally {
     clearTimeout(timer);

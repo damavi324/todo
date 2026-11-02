@@ -86,7 +86,7 @@ Browser (Twilio Voice SDK)                Twilio                     This server
 "Join the call":  REST update ──> <Dial><Client> your browser + transcription continues
 ```
 
-- The agent always opens with a fixed line: *"Hi, this is Pilot, an AI assistant calling on behalf of Mk. This call is being transcribed."* It never claims to be human.
+- The agent always opens with a fixed line: *"Hi, this is Pilot, an AI assistant calling on behalf of (your name). This call is being transcribed."* It never claims to be human.
 - Guardrails in the agent prompt: no payments, cancellations or sign-ups without your yes; no SSN, card or bank numbers; reads back details before hanging up; asks you when anything falls outside the brief.
 - Call history and summaries are saved to `data/calls.json`.
 

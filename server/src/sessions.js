@@ -40,6 +40,31 @@ function saveToHistory(s) {
 }
 export const history = () => loadHistory();
 
+const RESULT_TEXT = { live: 'In progress', answered: 'Answered', voicemail: 'Voicemail', no_answer: 'No answer', busy: 'Busy', canceled: 'Canceled', failed: 'Failed' };
+
+/**
+ * How a call went, in one word the app can filter on: live, answered, voicemail, no_answer, busy, canceled or failed.
+ * Works for saved calls from before this was recorded too.
+ */
+export function callResult(c) {
+  if (!c.endedAt) return 'live';
+  if (c.voicemail || c.summary?.outcome === 'voicemail') return 'voicemail';
+  if (c.status === 'busy') return 'busy';
+  if (c.status === 'no-answer') return 'no_answer';
+  if (c.status === 'canceled') return 'canceled';
+  if (c.status === 'failed' || c.error) return 'failed';
+  if (c.answered || c.transcript?.some((l) => l.speaker === 'them')) return 'answered';
+  return 'no_answer';
+}
+
+function recordResult(s, how = '') {
+  const result = callResult(s);
+  if (s.result === result) return;
+  s.result = result;
+  slog(s, ['answered', 'live'].includes(result) ? 'info' : 'warn', `Result: ${RESULT_TEXT[result]}${how}`);
+  emit(s, 'result', { result });
+}
+
 /** Light list for the Recent calls panel (no transcripts or long details). */
 export function historyList() {
   const live = [...sessions.values()].map(publicView);
@@ -50,7 +75,8 @@ export function historyList() {
     .map((h) => ({
       id: h.id, mode: h.mode, to: h.to, goal: h.goal, status: h.status, startedAt: h.startedAt, endedAt: h.endedAt,
       error: h.error || null, outcome: h.summary?.outcome || null, headline: h.summary?.headline || null,
-      hasPlan: !!h.plan, briefChars: (h.brief || '').length,
+      result: h.endedAt ? h.result || callResult(h) : 'live',
+      hasPlan: !!h.plan, briefChars: (h.brief || '').length, usage: h.usage || null,
     }));
 }
 
@@ -77,7 +103,7 @@ export function slog(s, level, text) {
   persist(s);
 }
 
-export function createSession({ mode, to, goal, brief, plan, owner, about, localNow }) {
+export function createSession({ mode, to, goal, brief, plan, owner, about, localNow, skills = [], planUsage }) {
   const s = {
     id: crypto.randomUUID(),
     mode, // 'copilot' | 'agent'
@@ -90,6 +116,9 @@ export function createSession({ mode, to, goal, brief, plan, owner, about, local
     goal: (goal || '').trim(),
     brief: (brief || '').trim(),
     plan: plan || null,
+    skills,
+    // What this call used: Claude tokens per model (call plan, live tips, notes) and how long it lasted.
+    usage: { claude: cleanUsage(planUsage), seconds: 0 },
     status: 'starting',
     callSid: null,
     startedAt: new Date().toISOString(),
@@ -114,6 +143,17 @@ export function createSession({ mode, to, goal, brief, plan, owner, about, local
 }
 
 export const getSession = (id) => sessions.get(id);
+
+/** Token counts sent back by the app (from writing the call plan), checked to be plain numbers. */
+function cleanUsage(u) {
+  const out = {};
+  if (!u || typeof u !== 'object') return out;
+  const n = (v) => (Number.isFinite(v) && v >= 0 ? Math.min(Math.round(v), 1e8) : 0);
+  for (const [model, t] of Object.entries(u).slice(0, 5)) {
+    if (/^[\w.-]{1,60}$/.test(model)) out[model] = { in: n(t?.in), out: n(t?.out), calls: n(t?.calls) };
+  }
+  return out;
+}
 
 // Safety net: a call Twilio never reported as finished is closed after the maximum call length,
 // and finished calls are dropped from memory (they stay in history on disk).
@@ -159,6 +199,21 @@ export function addLine(s, speaker, text) {
   if (speaker === 'them' && (s.mode === 'copilot' || s.joined)) scheduleSuggestion(s);
 }
 
+/**
+ * Records that a machine answered, not a person: a note in the transcript, and (on an AI call) a heads-up
+ * to the agent so it leaves its short message instead of trying to hold a conversation.
+ */
+export function markVoicemail(s, note = 'Went to voicemail. No one picked up.') {
+  if (s.voicemail) return;
+  s.voicemail = true;
+  addLine(s, 'system', note);
+  s._agent?.note(
+    'IMPORTANT: this call was answered by voicemail or an answering machine, not a person. Nobody is listening live. ' +
+    'Do not ask questions or wait for answers. After the greeting ends (or the beep), leave your one short voicemail message, ' +
+    'then call finish_call with outcome "voicemail".'
+  );
+}
+
 export function setPartial(s, speaker, text) {
   s._partials[speaker] = text;
   emit(s, 'partial', { speaker, text });
@@ -189,7 +244,7 @@ export function utteranceAssembler(s, speaker) {
 const transcriptText = (s, maxLines = 40) =>
   s.transcript
     .slice(-maxLines)
-    .map((l) => `${l.speaker === 'you' ? (s.ownerName || config.ownerName) : l.speaker === 'agent' ? 'AI agent' : 'Other party'}: ${l.text}`)
+    .map((l) => `${l.speaker === 'you' ? (s.ownerName || config.ownerName) : l.speaker === 'agent' ? 'AI agent' : l.speaker === 'system' ? '[Call note]' : 'Other party'}: ${l.text}`)
     .join('\n');
 
 // ---------- Live suggestions (copilot) ----------
@@ -210,6 +265,7 @@ export async function runSuggestion(s) {
   const started = Date.now();
   try {
     const text = await complete({
+      usage: s.usage.claude,
       model: config.anthropic.fastModel,
       maxTokens: 300,
       timeoutMs: 12000,
@@ -291,6 +347,7 @@ export function finalize(s, reason = 'ended') {
   } else {
     setStatus(s, 'ended', reason);
   }
+  recordResult(s);
   // give in-flight transcripts a moment to land, then summarize
   setTimeout(() => summarize(s), 1500);
 }
@@ -324,6 +381,7 @@ async function summarize(s) {
   }
   try {
     const text = await complete({
+      usage: s.usage.claude,
       // Short calls don't need the bigger model: same quality notes, a fraction of the cost.
       model: s.transcript.length > 14 ? config.anthropic.smartModel : config.anthropic.fastModel,
       maxTokens: 700,
@@ -338,9 +396,17 @@ async function summarize(s) {
         '"action_items":[{"title":"<follow-up for ' + (s.ownerName || config.ownerName) + '>","date":"YYYY-MM-DD or empty"}],' +
         '"callback_after":""}',
       prompt: `Owner's current date and time: ${s.localNow || new Date().toISOString()}\nCall to ${s.to}. Goal: ${s.goal || '(not given)'}\nAbout them: ${(s.about || '(none)').slice(0, 2000)}\nThis call: ${(s.brief || '(none)').slice(0, 8000)}
-Plan objective: ${s.plan?.objective || '(none)'}\nMode: ${s.mode}\n\nTranscript:\n${transcriptText(s, 400)}`,
+Plan objective: ${s.plan?.objective || '(none)'}\nMode: ${s.mode}
+${s.agentOutcome ? `The AI agent reported the call as: ${s.agentOutcome.outcome}${s.agentOutcome.note ? ` (${s.agentOutcome.note})` : ''}\n` : ''}${s.voicemail ? 'This call reached VOICEMAIL: no person answered. outcome must be "voicemail". Say plainly that it went to voicemail and what message was left; never describe it as a conversation, and nothing was agreed or booked.\n' : ''}
+Transcript:\n${transcriptText(s, 400)}`,
     });
     s.summary = normalizeSummary(parseJson(text)) || { outcome: 'done', headline: 'Call notes', summary: text, action_items: [] };
+    if (s.voicemail) Object.assign(s.summary, { outcome: 'voicemail', appointments: [] });
+    // Twilio can miss a machine; if the transcript shows a voicemail greeting, say so in the transcript too.
+    else if (s.summary.outcome === 'voicemail') {
+      markVoicemail(s);
+      recordResult(s, ' (from the transcript)');
+    }
   } catch (err) {
     console.error(`[summary] failed: ${err.message}`);
     s.summary = { outcome: 'unknown', headline: 'Summary unavailable', summary: err.message, action_items: [] };

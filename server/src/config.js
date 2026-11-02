@@ -17,7 +17,8 @@ export const config = {
   // Render/Railway/Fly provide the public host name; on Google Cloud Run it's worked out at startup (server.js).
   publicHost: (clean(e.PUBLIC_HOST) || clean(e.RENDER_EXTERNAL_HOSTNAME) || clean(e.RAILWAY_PUBLIC_DOMAIN) || (clean(e.FLY_APP_NAME) ? `${clean(e.FLY_APP_NAME)}.fly.dev` : '')).replace(/^https?:\/\//, '').replace(/\/+$/, ''),
   passcode: clean(e.APP_PASSCODE),
-  ownerName: clean(e.OWNER_NAME) || 'Mk',
+  // Only used when the app sends no name (the name in the app's Settings always wins).
+  ownerName: clean(e.OWNER_NAME) || 'my client',
   assistantName: clean(e.ASSISTANT_NAME) || 'Pilot',
   clientIdentity: (clean(e.CLIENT_IDENTITY) || 'owner').replace(/[^A-Za-z0-9_]/g, '') || 'owner',
   // Twilio webhook signature checking: 'enforce' (default when an auth token is set), 'log', or 'off'.

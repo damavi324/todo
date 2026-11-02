@@ -10,6 +10,7 @@ const SCHEMA = `{
   "kind": "personal or business",
   "ask_their_name": false,
   "objective": "one sentence: what success looks like",
+  "greeting": "the agent's very first line when the owner's skills say how to open the call; otherwise empty",
   "opening": "1-2 sentences the agent says right after its AI-assistant introduction, stating why it is calling. Natural, spoken, no names of the business unless given.",
   "steps": ["ordered conversation flow, 3-7 short steps"],
   "facts_to_share": [{"label": "e.g. Name on the account", "value": "the fact itself, copied from the details"}],
@@ -23,7 +24,7 @@ const SCHEMA = `{
   "missing_info": ["things the business will probably ask that the details do not answer"]
 }`;
 
-export function plannerSystem(owner = config.ownerName) {
+export function plannerSystem(owner = config.ownerName, skills = []) {
   return [
     `You are the call planner for ${owner}'s personal assistant. An AI voice agent named ${config.assistantName} will phone someone on ${owner}'s behalf, and your plan is its briefing.`,
     `Read ${owner}'s standing details and the note for this call. The standing details are true on every call. The note is only for this call. Either may be long, rambling, or dictated by voice with transcription errors; extract what matters and ignore filler.`,
@@ -34,25 +35,35 @@ export function plannerSystem(owner = config.ownerName) {
     `- Write can_agree_to strictly from what ${owner} said is acceptable. Anything involving money, fees, cancellations, contracts, sign-ups or choices outside stated preferences goes in ask_owner_before.`,
     '- If the details contain a Social Security number, full card or bank account number, password, or PIN, never copy the value anywhere. List only the type under never_share.',
     '- Keep every string short and speakable. The opening must sound like a person talking, not a form.',
+    skills.length
+      ? `${owner.toUpperCase()}'S SKILLS (how ${owner} wants every call handled; follow them, and where they conflict with the rules above, they win, except never invent facts):\n${skills.map((x) => `- ${x}`).join('\n')}\n` +
+        'If a skill says how to open the call, write that first line in greeting, filled in with the real name of the person or business and the reason, and keep opening to what comes after it.'
+      : 'Leave greeting empty.',
     `Reply ONLY with JSON in this shape:\n${SCHEMA}`,
   ].join('\n');
 }
 
-export async function generatePlan({ to, goal, brief, owner, about }) {
+export async function generatePlan({ to, goal, brief, owner, about, skills, usage }) {
   const name = String(owner || '').trim() || config.ownerName;
   const standing = String(about || '').trim().slice(0, 8000);
   const details = String(brief || goal || '').slice(0, MAX_DETAILS);
+  const skillList = cleanSkills(skills);
   const prompt = `Phone number being called: ${to}\n\nAbout ${name} (true on every call; do not ask the other person for these):\n${standing || '(none)'}\n\nThis call only:\n${details || '(not given)'}`;
   let text;
   try {
-    text = await complete({ model: config.anthropic.smartModel, system: plannerSystem(name), prompt, maxTokens: 1800, timeoutMs: 60000 });
+    text = await complete({ model: config.anthropic.smartModel, system: plannerSystem(name, skillList), prompt, maxTokens: 1800, timeoutMs: 60000, usage });
   } catch (err) {
     // Fall back to the fast model so a slow or unavailable model never blocks the call.
-    text = await complete({ model: config.anthropic.fastModel, system: plannerSystem(name), prompt, maxTokens: 1800, timeoutMs: 30000 });
+    text = await complete({ model: config.anthropic.fastModel, system: plannerSystem(name, skillList), prompt, maxTokens: 1800, timeoutMs: 30000, usage });
   }
   const plan = normalizePlan(parseJson(text));
   if (!plan) throw new Error('Could not build a call plan from the details. Try rephrasing the goal.');
   return plan;
+}
+
+/** The owner's call skills from the app: short instructions, at most 20. */
+export function cleanSkills(v) {
+  return Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x.trim().slice(0, 600) : '')).filter(Boolean).slice(0, 20) : [];
 }
 
 const str = (v, max = 600) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -65,6 +76,7 @@ export function normalizePlan(p) {
     kind: p.kind === 'business' ? 'business' : p.kind === 'personal' ? 'personal' : '',
     ask_their_name: p.kind === 'personal' ? false : p.ask_their_name === true,
     objective: str(p.objective, 300),
+    greeting: str(p.greeting, 300).replace(/^["']|["']$/g, ''),
     opening: str(p.opening, 300).replace(/^["']|["']$/g, ''),
     steps: strList(p.steps, 10),
     facts_to_share: Array.isArray(p.facts_to_share)
