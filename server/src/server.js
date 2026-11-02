@@ -239,6 +239,8 @@ async function route(req, res) {
       needsPasscode: !!config.passcode,
       problems: configProblems(),
       owner: config.ownerName,
+      // Which deploy is running (Cloud Run sets K_REVISION), so it's easy to see whether a push went live.
+      revision: process.env.K_REVISION || null,
       assistant: config.assistantName,
       callerId: config.twilio.callerId,
       api: 2,
