@@ -14,7 +14,7 @@ import {
 import { handleListenStream, handleAgentStream, joinAgentCall } from './streams.js';
 import { generatePlan, normalizePlan, cleanSkills } from './planner.js';
 import { accountUsage } from './usage.js';
-import { interpret } from './assistant.js';
+import { interpret, parseTask } from './assistant.js';
 import { ensureTwimlApp, validTwilioSignature } from './twilio.js';
 import { openLiveTranscriber } from './deepgram.js';
 
@@ -291,6 +291,17 @@ async function route(req, res) {
     } catch (err) {
       console.error('[assistant] failed:', err.message);
       return send(res, 502, { error: `Could not understand that: ${err.message}` });
+    }
+  }
+
+  if (p === '/api/parse-task' && method === 'POST') {
+    const body = await readBody(req);
+    try {
+      const usage = {};
+      const task = await parseTask(body, usage);
+      return send(res, 200, { task, usage });
+    } catch (err) {
+      return send(res, 502, { error: `Could not read that task: ${err.message}` });
     }
   }
 

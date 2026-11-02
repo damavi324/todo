@@ -47,7 +47,10 @@ const claudeServer = http.createServer((req, res) => {
     const isSummary = /post-call/.test(json.system);
     const isPlan = /call planner/.test(json.system);
     const isAssistant = /voice front door/.test(json.system);
-    const text = isAssistant
+    const isTask = /Turn one spoken reminder into a to-do task/.test(json.system);
+    const text = isTask
+      ? '{"title":"Buy milk","notes":"","dueDate":"2026-11-03","dueTime":"25:00","priority":"urgent"}'
+      : isAssistant
       ? '{"kind":"both","task":{"title":"Call the dentist","notes":"","dueDate":"2026-10-30","dueTime":"09:00","priority":"medium","listId":"personal"},"call":{"to":"(214) 555-0100","contact":"Bright Smiles Dental","goal":"Move the cleaning to a weekday morning","details":"Patient: Manoj Khanal","mode":"agent","when":"later"},"say":"Reminder Friday 9am to have Pilot call the dentist.","question":""}'
       : isPlan
       ? 'Here is the plan:\n{"objective":"Move the cleaning to a weekday morning next week","opening":"I\'m calling to reschedule a cleaning for Mk Khanal.","steps":["Explain the reason","Offer Tue-Thu 8-11am"],"facts_to_share":[{"label":"Patient","value":"Mk Khanal"},{"label":"Bad","value":""}],"can_agree_to":["Any Tue-Thu slot 8-11am"],"ask_owner_before":["Any fee"],"never_share":["Card number"],"likely_questions":[{"q":"Date of birth?","a":"Ask Mk"}],"if_phone_menu":"Press 2 for appointments","if_voicemail":"Hi, this is Pilot for Mk Khanal about rescheduling.","confirm_before_hanging_up":["date","time"],"missing_info":["Insurance provider"]}'
@@ -489,6 +492,13 @@ try {
   assert.match(agentLog.settings.agent.think.prompt, /Just so you know, this call is being transcribed/);
   tw4.close();
   pass('Call skills: planner and agent follow them, the first line is short and always says it is an AI');
+
+  claudeRequests.length = 0;
+  r = await req('/api/parse-task', { method: 'POST', body: { text: 'remind me to buy milk tomorrow', now: '2026-11-02T10:00', weekday: 'Monday', timezone: 'America/Chicago' } });
+  assert.deepEqual(r.json.task, { title: 'Buy milk', notes: '', dueDate: '2026-11-03', dueTime: '', priority: 'none' }, 'bad time and priority are dropped');
+  assert.equal(claudeRequests.at(-1).json.model, 'claude-haiku-5-5', 'task parsing uses the fast, cheap model');
+  assert.ok(r.json.usage['claude-haiku-5-5']);
+  pass('Spoken task parsing runs on Claude Haiku and reports its tokens');
 
   r = await req('/api/usage');
   assert.equal(r.status, 200);

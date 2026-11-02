@@ -79,7 +79,7 @@ export default function UsagePanel({ onClose }) {
             <Stat label="Calls" value={t.calls} />
             <Stat label="Assistant call time" value={mins(t.agentSeconds)} />
             <Stat label="Your call time" value={mins(t.talkSeconds)} />
-            <Stat label="Voice assistant requests" value={t.assistantRequests} />
+            <Stat label="Voice requests" value={t.assistantRequests} />
           </dl>
           <div className="mt-3 rounded-xl border border-line overflow-hidden">
             <table className="w-full text-[13px]">

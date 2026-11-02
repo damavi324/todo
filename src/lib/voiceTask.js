@@ -1,33 +1,17 @@
 import { toLocalYMD } from './dates'
 
-const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || '').trim()
-const GEMINI_MODEL = 'gemini-2.5-flash'
-const TASK_SCHEMA = {
-  type: 'OBJECT',
-  properties: {
-    title: { type: 'STRING' },
-    notes: { type: 'STRING' },
-    dueDate: { type: 'STRING' },
-    dueTime: { type: 'STRING' },
-    priority: { type: 'STRING', enum: ['none', 'low', 'medium', 'high'] },
-  },
-  required: ['title', 'notes', 'dueDate', 'dueTime', 'priority'],
-}
+// Spoken sentence -> task fields. With the calling server connected, Claude (its fast model) reads it;
+// otherwise, or if that fails, a small built-in parser does.
+import { cp, isCallPilotReady } from './callpilot'
+import { recordOtherUsage } from './usage'
 
-export function isGeminiConfigured() {
-  return GEMINI_API_KEY.length > 0
-}
-
-/**
- * Turn a spoken sentence into task fields.
- * Uses Gemini when an API key is built into the app, otherwise a small local parser.
- */
+/** Turn a spoken sentence into task fields. */
 export async function parseSpokenTask(transcript) {
   const text = (transcript || '').trim()
   if (!text) throw new Error('Nothing was heard')
-  if (isGeminiConfigured()) {
+  if (isCallPilotReady()) {
     try {
-      return await parseWithGemini(text)
+      return await parseWithServer(text)
     } catch (error) {
       const fallback = localParse(text)
       fallback.notes = fallback.notes || `Heard: ${text}`
@@ -38,47 +22,17 @@ export async function parseSpokenTask(transcript) {
   return localParse(text)
 }
 
-async function parseWithGemini(text) {
-  const now = new Date()
-  const prompt = [
-    'Turn this spoken reminder into a task.',
-    `Today is ${toLocalYMD(now)} (${now.toLocaleDateString('en-US', { weekday: 'long' })}).`,
-    `The local time is ${now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}.`,
-    'Return JSON only with keys title, notes, dueDate, dueTime, priority.',
-    'dueDate is YYYY-MM-DD. When a time was mentioned but no day, use today, or tomorrow if that time has already passed today.',
-    'dueDate is an empty string only when neither a day nor a time was mentioned.',
-    'dueTime is HH:mm in 24-hour time or an empty string when no time was mentioned.',
-    'priority is one of none, low, medium, high.',
-    'title is the task itself, without the date and time words and without lead-ins like "remind me to".',
-    `Spoken text: ${text}`,
-  ].join('\n')
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
-      method: 'POST',
-      // Sent as a header rather than ?key= so the key stays out of URLs and logs.
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: 'application/json',
-          responseSchema: TASK_SCHEMA,
-        },
-      }),
-    }
-  )
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(body.slice(0, 160) || `Gemini error ${res.status}`)
-  }
-
-  const data = await res.json()
-  const raw = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || ''
-  const parsed = JSON.parse(raw.replace(/^```json\s*|```$/g, '').trim())
-  return normalize(parsed, text)
+async function parseWithServer(text) {
+  const d = new Date()
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const { task, usage } = await cp('/api/parse-task', {
+    text,
+    now: `${toLocalYMD(d)}T${hm}`,
+    weekday: d.toLocaleDateString('en-US', { weekday: 'long' }),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  }, { timeoutMs: 20000 })
+  recordOtherUsage('task', usage)
+  return normalize(task, text)
 }
 
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']

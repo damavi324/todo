@@ -102,3 +102,36 @@ export function normalize(r, spoken, lists = []) {
   if (out.kind === 'both' && !out.call && out.task) out.kind = 'task';
   return out;
 }
+
+const TASK_SCHEMA = `{"title": "short task title without date/time words or lead-ins like 'remind me to'", "notes": "extra details worth keeping, or empty", "dueDate": "YYYY-MM-DD or empty", "dueTime": "HH:mm 24-hour or empty", "priority": "none|low|medium|high"}`;
+
+/**
+ * One spoken (or typed) sentence becomes task fields. A simple extraction, so it runs on the fast,
+ * cheapest model with a short reply.
+ */
+export async function parseTask({ text, now, timezone, weekday }, usage) {
+  const spoken = s(text, 1000);
+  if (!spoken) throw new Error('Nothing was heard');
+  const reply = await complete({
+    model: config.anthropic.fastModel,
+    maxTokens: 250,
+    timeoutMs: 15000,
+    usage,
+    system: [
+      'Turn one spoken reminder into a to-do task. It came from speech-to-text, so expect small errors and filler words.',
+      'Resolve relative dates and times ("tomorrow", "next Monday", "in 2 hours", "this evening" = 18:00) from the current date and time.',
+      'When a time is given but no day, use today, or tomorrow if that time has already passed today. Leave dueDate and dueTime empty when none was said.',
+      'priority is high only if they say urgent or important, otherwise none.',
+      `Reply ONLY with JSON: ${TASK_SCHEMA}`,
+    ].join('\n'),
+    prompt: `Current local date/time: ${s(now, 40) || new Date().toISOString()} (${s(weekday, 12)}), time zone ${s(timezone, 60) || 'unknown'}.\nThey said: "${spoken}"`,
+  });
+  const t = parseJson(reply) || {};
+  return {
+    title: s(t.title, 200) || spoken.slice(0, 200),
+    notes: s(t.notes, 1000),
+    dueDate: /^\d{4}-\d{2}-\d{2}$/.test(t.dueDate) ? t.dueDate : '',
+    dueTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(t.dueTime) ? t.dueTime : '',
+    priority: ['none', 'low', 'medium', 'high'].includes(t.priority) ? t.priority : 'none',
+  };
+}
