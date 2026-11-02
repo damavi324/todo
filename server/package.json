@@ -9,6 +9,7 @@
   },
   "scripts": {
     "go": "node src/go.js",
+    "build": "node --check src/server.js",
     "start": "node src/server.js",
     "check": "node src/check.js",
     "test": "node test/simulate.js",
