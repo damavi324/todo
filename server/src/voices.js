@@ -4,19 +4,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
-import { openVoiceAgent, speakConfig } from './deepgram.js';
+import { openVoiceAgent, listenProvider, speakConfig } from './deepgram.js';
 
 const owner = config.ownerName;
 const LINE = `Hi, this is ${config.assistantName}, an AI assistant calling on behalf of ${owner}. Um, I'm hoping to move a cleaning appointment to a Monday morning. Do you have anything open?`;
 
 const CANDIDATES = [
-  { file: '1-flux-alexis-lively', label: 'Flux Alexis, lively (previous default)', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-alexis-en  AGENT_EXPRESSIVITY=1', o: { agentTts: 'flux', agentVoice: 'flux-alexis-en', agentExpressivity: '1' } },
-  { file: '1b-flux-cliff', label: 'Flux Cliff, deep male (current default)', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-cliff-en  AGENT_EXPRESSIVITY=0', o: { agentTts: 'flux', agentVoice: 'flux-cliff-en', agentExpressivity: '0' } },
-  { file: '2-flux-alexis-animated', label: 'Flux Alexis, most animated', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-alexis-en  AGENT_EXPRESSIVITY=2', o: { agentTts: 'flux', agentVoice: 'flux-alexis-en', agentExpressivity: '2' } },
-  { file: '3-flux-kit-lively', label: 'Flux Kit, lively', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-kit-en  AGENT_EXPRESSIVITY=1', o: { agentTts: 'flux', agentVoice: 'flux-kit-en', agentExpressivity: '1' } },
-  { file: '4-aura-thalia', label: 'Aura 2 Thalia', env: 'AGENT_TTS=aura  AGENT_VOICE=aura-2-thalia-en', o: { agentTts: 'aura', agentVoice: 'aura-2-thalia-en' } },
-  { file: '5-cartesia-sonic-2', label: 'Cartesia Sonic 2 (managed by Deepgram)', env: 'AGENT_TTS=cartesia  CARTESIA_MODEL=sonic-2', o: { agentTts: 'cartesia', cartesiaModel: 'sonic-2' }, only: true },
-  { file: '6-cartesia-sonic-3', label: 'Cartesia Sonic 3 (managed by Deepgram)', env: 'AGENT_TTS=cartesia  CARTESIA_MODEL=sonic-3', o: { agentTts: 'cartesia', cartesiaModel: 'sonic-3' }, only: true },
+  { file: '1-flux-miles', label: 'Flux Miles, clear and sincere (current default)', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-miles-en', o: { agentTts: 'flux', agentVoice: 'flux-miles-en', agentExpressivity: '0' } },
+  { file: '2-flux-wes', label: 'Flux Wes, warm and friendly', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-wes-en', o: { agentTts: 'flux', agentVoice: 'flux-wes-en', agentExpressivity: '0' } },
+  { file: '3-flux-bruce', label: 'Flux Bruce, amiable and natural', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-bruce-en', o: { agentTts: 'flux', agentVoice: 'flux-bruce-en', agentExpressivity: '0' } },
+  { file: '4-flux-drew', label: 'Flux Drew, relaxed and soft', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-drew-en', o: { agentTts: 'flux', agentVoice: 'flux-drew-en', agentExpressivity: '0' } },
+  { file: '5-flux-marcus', label: 'Flux Marcus, smooth and kind', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-marcus-en', o: { agentTts: 'flux', agentVoice: 'flux-marcus-en', agentExpressivity: '0' } },
+  { file: '6-flux-cliff', label: 'Flux Cliff, deep and gravelly (previous default)', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-cliff-en', o: { agentTts: 'flux', agentVoice: 'flux-cliff-en', agentExpressivity: '0' } },
+  { file: '7-flux-alexis', label: 'Flux Alexis, soothing female', env: 'AGENT_TTS=flux  AGENT_VOICE=flux-alexis-en', o: { agentTts: 'flux', agentVoice: 'flux-alexis-en', agentExpressivity: '0' } },
+  { file: '8-aura-thalia', label: 'Aura 2 Thalia', env: 'AGENT_TTS=aura  AGENT_VOICE=aura-2-thalia-en', o: { agentTts: 'aura', agentVoice: 'aura-2-thalia-en' } },
+  { file: '9-cartesia-sonic-2', label: 'Cartesia Sonic 2 (managed by Deepgram)', env: 'AGENT_TTS=cartesia  CARTESIA_MODEL=sonic-2', o: { agentTts: 'cartesia', cartesiaModel: 'sonic-2' }, only: true },
 ];
 
 function mulawToPcm16(buf) {
@@ -59,7 +61,7 @@ function audition(c) {
         audio: { input: { encoding: 'mulaw', sample_rate: 8000 }, output: { encoding: 'mulaw', sample_rate: 8000, container: 'none' } },
         agent: {
           language: 'en',
-          listen: { provider: { type: 'deepgram', version: 'v2', model: config.deepgram.agentListenModel } },
+          listen: { provider: listenProvider(config.deepgram.agentListenModel) },
           think: { provider: { type: 'anthropic', model: config.deepgram.agentThinkModel }, prompt: 'Stay silent.' },
           speak,
           greeting: LINE,

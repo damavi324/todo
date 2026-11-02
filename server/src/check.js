@@ -2,6 +2,7 @@
 // Usage: npm run check            (report only)
 //        npm run check -- --fix   (also points the TwiML App's Voice URL at PUBLIC_HOST)
 import { config, configProblems, publicUrl } from './config.js';
+import { thinkUsesOwnKey } from './deepgram.js';
 
 const fix = process.argv.includes('--fix');
 const ok = (m) => console.log(`  ✔ ${m}`);
@@ -66,7 +67,11 @@ try {
   res.ok ? ok('API key accepted') : bad(`API key rejected (HTTP ${res.status})`);
   const models = await fetch('https://agent.deepgram.com/v1/agent/settings/think/models').then((r) => r.json()).catch(() => null);
   const ids = (models?.models || []).map((m) => m.id);
-  if (!ids.length) warn('Could not list agent LLM models; skipping model check');
+  const model = config.deepgram.agentThinkModel;
+  if (thinkUsesOwnKey()) {
+    ok(`Agent think model ${model} runs on your Anthropic key (billed by Anthropic, not Deepgram)`);
+    if (ids.includes(model)) warn(`Deepgram now runs ${model} itself; set AGENT_THINK_ENDPOINT=deepgram to bill it through Deepgram instead`);
+  } else if (!ids.length) warn('Could not list agent LLM models; skipping model check');
   else if (ids.includes(config.deepgram.agentThinkModel)) ok(`Agent think model ${config.deepgram.agentThinkModel} is supported`);
   else bad(`AGENT_THINK_MODEL ${config.deepgram.agentThinkModel} is not on Deepgram's list. Anthropic options: ${ids.filter((i) => i.startsWith('claude')).join(', ')}`);
 } catch (err) {

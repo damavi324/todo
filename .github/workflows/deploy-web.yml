@@ -6,7 +6,7 @@ name: Deploy web
 on:
   push:
     branches: [main]
-    paths-ignore: ['**.md', 'server/**', 'android/**', 'render.yaml']
+    paths-ignore: ['**.md', 'server/**', 'android/**']
   workflow_dispatch:
 permissions:
   contents: read

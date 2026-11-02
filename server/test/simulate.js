@@ -376,15 +376,18 @@ try {
   assert.equal(agentLog.auth, 'Token dg_test');
   assert.deepEqual(st.audio.input, { encoding: 'mulaw', sample_rate: 8000 });
   assert.deepEqual(st.audio.output, { encoding: 'mulaw', sample_rate: 8000, container: 'none' });
-  assert.deepEqual(st.agent.listen.provider, { type: 'deepgram', model: 'flux-general-en', version: 'v2' });
-  assert.deepEqual(st.agent.speak.provider, { type: 'deepgram', version: 'v2', model: 'flux-cliff-en', speed: 1, expressivity: 0 });
+  assert.deepEqual(st.agent.listen.provider, { type: 'deepgram', model: 'flux-general-en', version: 'v2', eager_eot_threshold: 0.5, eot_timeout_ms: 3000 });
+  assert.deepEqual(st.agent.speak.provider, { type: 'deepgram', version: 'v2', model: 'flux-miles-en', speed: 1, expressivity: 0 });
   assert.match(st.agent.think.prompt, /usually one sentence, at most two/);
   assert.match(st.agent.think.prompt, /Do not ask "what's your name\?"/);
   assert.deepEqual(st.agent.think.provider, { type: 'anthropic', model: 'claude-haiku-4-5' });
+  assert.equal(st.agent.think.endpoint, undefined, 'managed model: no Anthropic key sent to Deepgram');
   assert.deepEqual(st.agent.think.functions.map((f) => f.name), ['ask_owner', 'press_digits', 'finish_call']);
-  assert.match(st.agent.greeting, /^Hi, this is Pilot, an AI assistant calling on behalf of Mk\. This call is being transcribed\.$/);
+  assert.ok(st.agent.think.functions.every((f) => f.defer_until_eot), 'tools wait for the end of their turn');
+  assert.equal(st.agent.greeting, undefined, 'no greeting over their "Hello?"');
+  assert.match(st.agent.think.prompt, /your reply is exactly this, word for word: "Hi, this is Pilot, an AI assistant calling on behalf of Mk\. This call is being transcribed\."/);
   assert.match(st.agent.think.prompt, /Reschedule cleaning to Tue morning/);
-  pass('Voice agent configured: Flux listen/speak, Claude brain, tools, fixed AI disclosure greeting');
+  pass('Voice agent configured: Flux listen/speak with quick turn-taking, Claude brain, tools, AI disclosure as first line');
 
   await waitFor(() => agentLog.audioBytes >= 800, 'caller audio to agent');
   pass('Caller audio is relayed to the agent after SettingsApplied');
@@ -437,9 +440,12 @@ try {
   const tw2 = new WebSocket(`ws://localhost:${PORTS.app}/streams/agent`);
   await new Promise((res) => tw2.on('open', res));
   tw2.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_2', callSid: 'CA_AGENT_2', customParameters: { sessionId: ag2.id } } }));
-  await waitFor(() => agentLog.settings?.agent?.greeting?.includes('reschedule a cleaning'), 'plan settings');
+  await waitFor(() => agentLog.settings?.agent?.think?.prompt?.includes('reschedule a cleaning'), 'plan settings');
   const st2 = agentLog.settings.agent;
-  assert.equal(st2.greeting, "Hi, this is Pilot, an AI assistant calling on behalf of Mk. This call is being transcribed. I'm calling to reschedule a cleaning for Mk Khanal.");
+  const opener = "Hi, this is Pilot, an AI assistant calling on behalf of Mk. This call is being transcribed. I'm calling to reschedule a cleaning for Mk Khanal.";
+  assert.ok(st2.think.prompt.includes(`word for word: "${opener}"`));
+  await waitFor(() => agentLog.injected.includes(opener), 'opener after silence', 5000);
+  pass('Nobody says hello: the agent opens the call itself after a short wait');
   assert.match(st2.think.prompt, /CALL PLAN \(a guide, not a script/);
   assert.match(st2.think.prompt, /Check with Mk \(ask_owner\) before:\n- Any fee/);
   assert.match(st2.think.prompt, /If you hit a phone menu: Press 2 for appointments/);
@@ -468,7 +474,7 @@ try {
   agentLog.settings = null;
   tw3.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_3', callSid: ag3.callSid, customParameters: { sessionId: ag3.id } } }));
   await waitFor(() => agentLog.settings, 'named agent settings');
-  assert.match(agentLog.settings.agent.greeting, /calling on behalf of Sam Rivera\./);
+  assert.match(agentLog.settings.agent.think.prompt, /word for word: "[^"]*calling on behalf of Sam Rivera\./);
   assert.match(agentLog.settings.agent.think.prompt, /Check with Sam Rivera \(ask_owner\) before:/);
   assert.doesNotMatch(agentLog.settings.agent.think.prompt, /Check with Mk\b/);
   pass('Your profile name reaches the call plan, the greeting and the agent’s instructions');
@@ -487,7 +493,7 @@ try {
   agentLog.settings = null;
   tw4.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_4', callSid: ag4.callSid, customParameters: { sessionId: ag4.id } } }));
   await waitFor(() => agentLog.settings, 'skills agent settings');
-  assert.equal(agentLog.settings.agent.greeting, 'Hi, this is Pilot, an AI assistant. I am trying to reach John regarding dinner on Friday, on behalf of Mr. Manoj Khanal.');
+  assert.ok(agentLog.settings.agent.think.prompt.includes('word for word: "Hi, this is Pilot, an AI assistant. I am trying to reach John regarding dinner on Friday, on behalf of Mr. Manoj Khanal."'));
   assert.match(agentLog.settings.agent.think.prompt, /SKILLS \(follow these on every call\):\n- Open with/);
   assert.match(agentLog.settings.agent.think.prompt, /Just so you know, this call is being transcribed/);
   tw4.close();

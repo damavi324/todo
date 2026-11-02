@@ -42,7 +42,7 @@ export default function CallingSettings() {
           <p className="text-sm text-ink">Calling server</p>
           <p className="text-xs text-ink-3 mt-0.5">Your CallPilot server’s address and passcode. The same connection works on all your devices.</p>
         </div>
-        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://callpilot.onrender.com" inputMode="url"
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://callpilot-….run.app" inputMode="url"
           autoCapitalize="off" autoCorrect="off" spellCheck={false} className={`${fieldClass} w-full`} />
         <input value={passcode} onChange={(e) => setPasscode(e.target.value)} type="password" autoComplete="current-password"
           placeholder={connected ? 'Passcode saved' : 'Server passcode'} className={`${fieldClass} w-full`} />

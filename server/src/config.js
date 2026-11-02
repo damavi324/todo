@@ -14,8 +14,8 @@ const clean = (v) => (v || '').trim();
 export const config = {
   root,
   port: Number(e.PORT || 5050),
-  // Render/Railway/Fly provide the public host name; on Google Cloud Run it's worked out at startup (server.js).
-  publicHost: (clean(e.PUBLIC_HOST) || clean(e.RENDER_EXTERNAL_HOSTNAME) || clean(e.RAILWAY_PUBLIC_DOMAIN) || (clean(e.FLY_APP_NAME) ? `${clean(e.FLY_APP_NAME)}.fly.dev` : '')).replace(/^https?:\/\//, '').replace(/\/+$/, ''),
+  // On Google Cloud Run the public host name is worked out at startup (server.js); set PUBLIC_HOST for a custom domain.
+  publicHost: clean(e.PUBLIC_HOST).replace(/^https?:\/\//, '').replace(/\/+$/, ''),
   passcode: clean(e.APP_PASSCODE),
   // Only used when the app sends no name (the name in the app's Settings always wins).
   ownerName: clean(e.OWNER_NAME) || 'my client',
@@ -43,7 +43,11 @@ export const config = {
     agentUrl: clean(e.DEEPGRAM_AGENT_URL) || 'wss://agent.deepgram.com/v1/agent/converse',
     listenModel: clean(e.DEEPGRAM_LISTEN_MODEL) || 'nova-3',
     agentListenModel: clean(e.AGENT_LISTEN_MODEL) || 'flux-general-en',
-    agentVoice: clean(e.AGENT_VOICE) || 'flux-cliff-en',
+    // Flux turn-taking: end-of-turn confidence (0.5-1), early "probably done" signal (0.3-0.9, or off), max wait in ms.
+    agentEotThreshold: clean(e.AGENT_EOT_THRESHOLD),
+    agentEagerEot: clean(e.AGENT_EAGER_EOT),
+    agentEotTimeoutMs: clean(e.AGENT_EOT_TIMEOUT_MS),
+    agentVoice: clean(e.AGENT_VOICE) || 'flux-miles-en',
     // Voice engine: flux | aura | cartesia (Cartesia is managed by Deepgram, no extra account)
     agentTts: (clean(e.AGENT_TTS) || '').toLowerCase(),
     agentSpeed: clean(e.AGENT_SPEED),
@@ -51,6 +55,9 @@ export const config = {
     cartesiaModel: clean(e.CARTESIA_MODEL) || 'sonic-2',
     cartesiaVoice: clean(e.CARTESIA_VOICE_ID) || 'a167e0f3-df7e-4d52-a9c3-f949145efdab',
     agentThinkModel: clean(e.AGENT_THINK_MODEL) || 'claude-haiku-4-5',
+    // Who runs the agent's Claude: 'deepgram' (managed, in Deepgram's per-minute rate) or 'anthropic' (your key,
+    // billed by Anthropic). Empty = Deepgram for models it manages, your key for any other model.
+    agentThinkEndpoint: (clean(e.AGENT_THINK_ENDPOINT) || '').toLowerCase(),
   },
   anthropic: {
     apiKey: clean(e.ANTHROPIC_API_KEY),
