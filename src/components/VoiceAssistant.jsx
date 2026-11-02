@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Phone, CalendarPlus, RotateCcw, X, Flag } from 'lucide-react'
+import { Loader2, Phone, CalendarPlus, RotateCcw, X, Flag, Mic, MicOff, ArrowUp } from 'lucide-react'
 import { cp, isCallPilotReady, assistantName, formatNumber, callerContext } from '../lib/callpilot'
 import { startDictation } from '../lib/dictation'
 import { recordOtherUsage } from '../lib/usage'
@@ -26,14 +26,18 @@ function describeDue(t) {
   return t.dueTime ? `${day}, ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : day
 }
 
+// What a result turns into: a task (with any call attached), or a draft for the call form.
+const taskWithCall = (r) => ({ ...r.task, listId: r.task.listId || undefined, call: r.call ? { to: r.call.to, contact: r.call.contact, goal: r.call.goal, details: r.call.details, mode: r.call.mode } : undefined })
+const callDraft = (r) => ({ mode: r.call.mode, to: r.call.to || r.call.contact || '', goal: r.call.goal || (r.call.contact ? `Call ${r.call.contact}` : ''), brief: [r.call.contact && `Calling: ${r.call.contact}`, r.call.details].filter(Boolean).join('\n') })
+
 /**
- * One voice entry point for the whole app.
- * Talk naturally; Claude decides whether it is a task, a call for Pilot, or both.
- * Falls back to on-device speech + the old parser when the calling server is not set up.
+ * The assistant, from anywhere in the app: speak or type in the same box.
+ * Claude (on the calling server) decides whether it is a task, a call for Pilot, or both; a call you said out loud
+ * goes straight to dialing. Falls back to on-device speech + the built-in parser when the server is not set up.
  */
-export default function VoiceAssistant({ onClose, onTask: handTask, onCall }) {
+export default function VoiceAssistant({ onClose, onTask: handTask, onCall: handCall }) {
   const lists = useTaskStore((s) => s.lists)
-  const [phase, setPhase] = useState('listening') // listening | thinking | result | error
+  const [phase, setPhase] = useState('compose') // compose | thinking | result | error
   const [text, setText] = useState('')
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -44,11 +48,19 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall }) {
   // Closed while it was still working something out: drop the late result instead of acting on it.
   const closed = useRef(false)
   const onTask = (...args) => { if (!closed.current) handTask(...args) }
+  const onCall = (...args) => { if (!closed.current) handCall(...args) }
+  const [listening, setListening] = useState(false)
+  // Once you type, the words are yours: the microphone stops and nothing it hears afterwards replaces them.
+  const typed = useRef(false)
 
   // Turns what you said into a task and/or a call (Claude on the server, local parser as backup).
-  const interpret = async (heard) => {
+  const interpret = async (heard, { spoken = false } = {}) => {
     setText(heard)
     setPhase('thinking')
+    if (!smart) {
+      try { onTask(await parseSpokenTask(heard)) } catch (e) { setError(e.message); setPhase('error') }
+      return
+    }
     try {
       if (useCallStore.getState().serverState !== 'up') {
         setWaking(true)
@@ -60,6 +72,10 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall }) {
       recordOtherUsage('assistant', usage)
       // Single, clear intent: go straight to it.
       if (r.kind === 'task' && r.task) return onTask({ ...r.task, listId: r.task.listId || undefined })
+      // A call you said out loud, with who and why: plan it and dial, hands-free (cancel stays one tap away).
+      if (spoken && r.kind === 'call' && r.call && r.call.when !== 'later' && (r.call.to || r.call.contact) && r.call.goal) {
+        return onCall({ ...callDraft(r), autoStart: true })
+      }
       setResult(r)
       setPhase('result')
     } catch (e) {
@@ -75,46 +91,47 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall }) {
     }
   }
 
+  const stopListening = () => {
+    rec.current?.cancel()
+    rec.current = null
+    SpeechCapture.stop?.().catch(() => {})
+    setListening(false)
+  }
+
   const begin = async () => {
-    setText(''); setResult(null); setError(''); setPhase('listening')
-    // Server asleep (free cloud plan): start waking it, and listen on the phone meanwhile
-    // so you can talk right away instead of waiting for it.
+    setResult(null); setError(''); setPhase('compose')
+    typed.current = false
+    const before = text.trim()
+    const join = (t) => [before, t].filter(Boolean).join(' ')
+    setListening(true)
+    // Server asleep (free cloud plan) or not set up: listen on the phone, so you can talk right away.
     const serverUp = useCallStore.getState().serverState === 'up' && useCallStore.getState().connected
     setOnDevice(!smart || !serverUp)
-    if (smart && !serverUp) {
-      useCallStore.getState().wake()
+    if (!smart || !serverUp) {
+      if (smart) useCallStore.getState().wake()
       try {
         await SpeechCapture.requestPermissions()
         const { text: heard } = await SpeechCapture.listen()
-        if (!heard?.trim()) { setError('I didn’t catch anything. Try again.'); setPhase('error'); return }
-        await interpret(heard)
+        setListening(false)
+        if (typed.current || closed.current) return
+        if (!heard?.trim()) { setError('I didn’t catch anything. Try again, or type it.'); setPhase('error'); return }
+        await interpret(join(heard), { spoken: true })
       } catch (e) {
-        if (!/cancel/i.test(e?.message || '')) { setError(e?.message || 'Could not hear that'); setPhase('error') } else onClose()
-      }
-      return
-    }
-    if (!smart) {
-      // On-device recognizer: one utterance, then the existing task parser.
-      try {
-        await SpeechCapture.requestPermissions()
-        const { text: heard } = await SpeechCapture.listen()
-        setText(heard)
-        setPhase('thinking')
-        const task = await parseSpokenTask(heard)
-        onTask(task)
-      } catch (e) {
-        if (!/cancel/i.test(e?.message || '')) { setError(e?.message || 'Could not hear that'); setPhase('error') } else onClose()
+        setListening(false)
+        if (typed.current || closed.current) return
+        // No speech recognition here (a desktop browser, say): just type.
+        if (!/cancel/i.test(e?.message || '')) setError(e?.message || 'Could not hear that. You can type it instead.')
       }
       return
     }
     try {
       rec.current = await startDictation({
-        onText: (t) => setText(t),
-        onError: (e) => { setError(e.message); setPhase('error') },
+        onText: (t) => { if (!typed.current) setText(join(t)) },
+        onError: (e) => { setListening(false); if (!typed.current) setError(e.message) },
       })
     } catch (e) {
-      setError(e.message)
-      setPhase('error')
+      setListening(false)
+      setError(`${e.message} You can type it instead.`)
     }
   }
 
@@ -125,11 +142,23 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const finish = async () => {
-    const heard = (await rec.current?.stop()) || text
-    rec.current = null
-    if (!heard.trim()) { setError('I didn’t catch anything. Try again.'); setPhase('error'); return }
-    await interpret(heard)
+  // Send: what you said (finishing the dictation first) or what you typed.
+  const send = async () => {
+    if (rec.current && !typed.current) {
+      const heard = (await rec.current.stop()) || text
+      rec.current = null
+      setListening(false)
+      if (!heard.trim()) { setError('I didn’t catch anything. Try again, or type it.'); return }
+      return interpret(heard, { spoken: true })
+    }
+    stopListening()
+    if (text.trim()) await interpret(text.trim(), { spoken: !typed.current })
+  }
+
+  const onType = (value) => {
+    if (!typed.current) { typed.current = true; if (listening) stopListening() }
+    setError('')
+    setText(value)
   }
 
   const cancel = () => {
@@ -141,30 +170,37 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall }) {
 
   useBack(cancel)
 
-  const taskWithCall = (r) => ({ ...r.task, listId: r.task.listId || undefined, call: r.call ? { to: r.call.to, contact: r.call.contact, goal: r.call.goal, details: r.call.details, mode: r.call.mode } : undefined })
-  const callDraft = (r) => ({ mode: r.call.mode, to: r.call.to, goal: r.call.goal || (r.call.contact ? `Call ${r.call.contact}` : ''), brief: [r.call.contact && `Calling: ${r.call.contact}`, r.call.details].filter(Boolean).join('\n') })
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Voice assistant"
-      className="fixed inset-0 z-50 bg-black/30 flex items-end md:items-center md:justify-center fade-in" onClick={(e) => e.target === e.currentTarget && phase !== 'listening' && cancel()}>
+    <div role="dialog" aria-modal="true" aria-label="Assistant"
+      className="fixed inset-0 z-50 bg-black/30 flex items-end md:items-center md:justify-center fade-in" onClick={(e) => e.target === e.currentTarget && !listening && cancel()}>
       <div className="w-full md:w-[480px] bg-surface rounded-t-2xl md:rounded-2xl shadow-pop px-6 pt-6 pb-[calc(2rem+env(safe-area-inset-bottom,0px))] md:pb-8 max-h-[85dvh] overflow-y-auto slide-up md:fade-in">
-        {phase === 'listening' && (
+        {phase === 'compose' && (
           <>
             <div className="flex items-center gap-3">
-              <span className="relative flex w-3 h-3"><span className="absolute inline-flex h-full w-full rounded-full bg-danger opacity-75 animate-ping" /><span className="relative inline-flex rounded-full w-3 h-3 bg-danger" /></span>
-              <p className="text-lg font-semibold text-ink">Listening…</p>
+              {listening
+                ? <span className="relative flex w-3 h-3"><span className="absolute inline-flex h-full w-full rounded-full bg-danger opacity-75 animate-ping" /><span className="relative inline-flex rounded-full w-3 h-3 bg-danger" /></span>
+                : <Mic size={16} className="text-ink-3" />}
+              <p className="flex-1 text-lg font-semibold text-ink">{listening ? 'Listening…' : `Ask ${assistantName()}`}</p>
+              <button onClick={cancel} aria-label="Close" className="w-9 h-9 -mr-2 rounded-lg flex items-center justify-center text-ink-3 hover:bg-surface-2"><X size={17} /></button>
             </div>
-            <p className={`mt-3 min-h-[3.5rem] text-[17px] leading-snug ${text ? 'text-ink' : 'text-ink-3'}`}>
-              {text || (smart ? `Say anything: "Remind me Friday at 9 to renew my license", or "Have ${assistantName()} call the dentist at 214 555 0100 to move my cleaning."` : 'Say the task, including the day and time.')}
-            </p>
-            {smart && !onDevice ? (
-              <div className="flex gap-2 mt-5">
-                <button onClick={finish} className="flex-[2] bg-primary text-white font-medium h-11 rounded-lg">Done</button>
-                <button onClick={cancel} className="flex-1 bg-surface-2 text-ink font-medium h-11 rounded-lg">Cancel</button>
-              </div>
-            ) : (
-              <button onClick={cancel} className="mt-5 w-full bg-surface-2 text-ink font-medium h-11 rounded-lg">Cancel</button>
-            )}
+            <textarea value={text} onChange={(e) => onType(e.target.value)} rows={3} enterKeyHint="send"
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+              placeholder={smart ? `Speak or type: "Remind me Friday at 9 to renew my license", or "Have ${assistantName()} call the dentist at 214 555 0100 to move my cleaning."` : 'Speak or type the task, with the day and time.'}
+              className="mt-3 w-full resize-none rounded-xl bg-surface-2 px-3.5 py-3 text-[16px] leading-snug text-ink placeholder:text-ink-3 outline-none border border-transparent focus:border-accent/50" />
+            {error && <p className="text-xs text-warn mt-1.5">{error}</p>}
+            <div className="flex items-center gap-2 mt-3">
+              <button type="button" onClick={() => (listening ? (onDevice ? stopListening() : send()) : begin())}
+                aria-label={listening ? 'Stop listening' : 'Speak'}
+                className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 ${listening ? 'bg-danger text-white' : 'bg-surface-2 text-accent'}`}>
+                {listening ? <MicOff size={19} /> : <Mic size={19} />}
+              </button>
+              <p className="flex-1 min-w-0 text-xs text-ink-3">{listening ? 'Speak, or start typing to switch' : 'Type, or tap the mic to speak'}</p>
+              <button type="button" onClick={send} disabled={!text.trim() && !(listening && !onDevice)} aria-label="Send"
+                className="h-11 px-4 rounded-full bg-primary text-white font-medium flex items-center gap-1.5 disabled:opacity-40">
+                <ArrowUp size={17} />Send
+              </button>
+            </div>
           </>
         )}
 

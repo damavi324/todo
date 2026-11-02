@@ -10,7 +10,6 @@ import { callResult } from '../lib/callArchive'
 import { useTaskStore } from '../store/useTaskStore'
 import { formatNumber, assistantName, ownerName, isCallPilotReady } from '../lib/callpilot'
 import { startDictation, listenUntilPause } from '../lib/dictation'
-import { parseSpokenCall } from '../lib/spokenCall'
 import { say } from '../lib/notifications'
 import { loadPhoneContacts, phoneContacts, mergeContacts, pickByName } from '../lib/phoneContacts'
 import { formatDue } from '../lib/dates'
@@ -156,11 +155,9 @@ function Compose() {
   // Used up: the next time the form opens without a new draft, it starts empty.
   useEffect(() => { if (draft) useCallStore.setState({ draft: null }) }, [draft])
 
-  // Hands-free: the listener while it runs, what it has heard so far, and an "I'll talk" call about to dial.
-  const [listening, setListening] = useState(null)
-  const [heard, setHeard] = useState('')
-  const [autoCall, setAutoCall] = useState(null)
-  useEffect(() => () => listening?.cancel(), [listening])
+  // An "I'll talk" call started by voice, about to dial.
+  const [autoCall, setAutoCall] = useState(() =>
+    draft?.autoStart && draft.mode === 'copilot' && draft.to ? { mode: 'copilot', to: draft.to, text: callText(draft) } : null)
 
   // The phone's own contacts (Android, once allowed) join the ones saved here.
   const [phoneList, setPhoneList] = useState(phoneContacts)
@@ -214,67 +211,24 @@ function Compose() {
     go({ mode, to, text })
   }
 
-  /** One tap, then speak: "Call the dentist at 214 555 0100 and move my cleaning to next week." */
-  const speakCall = async () => {
-    if (listening) return listening.stop()
-    setError('')
-    setHeard('')
-    setAutoCall(null)
-    let listener
-    try {
-      listener = await listenUntilPause({ onText: setHeard })
-    } catch (e) {
-      setError(e.message)
-      return
-    }
-    setListening(listener)
-    let said = ''
-    try {
-      said = await listener.done
-    } catch (e) {
-      setError(e.message)
-    }
-    setListening(null)
-    if (!said.trim()) return
-
-    const parsed = parseSpokenCall(said, everyone)
-    const next = {
-      mode: parsed.mode || mode,
-      to: parsed.to ? formatNumber(parsed.to) || parsed.to : to,
-      text: parsed.note || text,
-    }
-    setMode(next.mode)
-    setTo(next.to)
-    setText(next.text)
-    if (!next.to.trim()) return say('I didn’t catch who to call. Say their full name or the number.')
-    if (next.mode === 'agent' && !next.text.trim()) return say('What should the call be about?')
-    const who = parsed.contact || callWith({ to: resolveTo(next.to) })
-    if (next.mode === 'agent') {
-      say(`Got it. Getting the call to ${who} ready.`)
-      go(next, { handsFree: true })
+  // Started by voice from the assistant: plan and dial with no more taps (cancel stays one tap away).
+  const autoStart = useRef(!!draft?.autoStart)
+  useEffect(() => {
+    if (!autoStart.current) return
+    autoStart.current = false
+    if (!to.trim() || (mode === 'agent' && !text.trim())) return
+    if (mode === 'agent') {
+      say(`Got it. Getting the call to ${callWith({ to: resolveTo(to) })} ready.`)
+      Promise.resolve().then(() => go({ mode, to, text }, { handsFree: true }))
     } else {
-      say(`Calling ${who} in ${HANDS_FREE_SECONDS} seconds.`)
-      setAutoCall(next)
+      say(`Calling ${callWith({ to: resolveTo(to) })} in ${HANDS_FREE_SECONDS} seconds.`)
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <Card>
       <form onSubmit={submit} className="p-5 space-y-5">
-        <button type="button" onClick={speakCall} disabled={!!busy}
-          className={`w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors disabled:opacity-50 ${listening ? 'bg-danger/10' : 'bg-accent/10 hover:bg-accent/15'}`}>
-          <span className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 ${listening ? 'bg-danger text-white animate-pulse' : 'bg-accent text-accent-ink'}`}>
-            {listening ? <MicOff size={20} /> : <Mic size={20} />}
-          </span>
-          <span className="min-w-0">
-            <span className="block text-[15px] font-medium text-ink">{listening ? 'Listening… pause when you’re done' : 'Speak the call'}</span>
-            <span className="block text-xs text-ink-3 mt-0.5 line-clamp-3">
-              {listening
-                ? heard || 'Who to call, and what it’s about'
-                : 'Hands-free: say who to call (a number or a contact) and what it’s about. It fills this in and dials.'}
-            </span>
-          </span>
-        </button>
         {autoCall && (
           <Countdown label={`Calling ${callWith({ to: resolveTo(autoCall.to) })}`}
             onDone={() => { const fields = autoCall; setAutoCall(null); go(fields, { handsFree: true }) }}

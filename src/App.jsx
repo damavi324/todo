@@ -31,6 +31,7 @@ export default function App() {
   // The task being edited, or a new task's starting values. null when the editor is closed.
   const [editor, setEditor] = useState(null)
   const [voiceOpen, setVoiceOpen] = useState(false)
+  const callView = useCallStore((s) => s.view)
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Phones only: the Lists tab, which shows every view and list to pick from.
   const [browsing, setBrowsing] = useState(false)
@@ -141,6 +142,8 @@ export default function App() {
   const openTask = (task) => setEditor({ task })
   const newTask = () => setEditor({ draft: null })
   const showCalls = appView === 'calls'
+  // Hidden while typing, and during a live call, where it would cover the call controls.
+  const showFab = !keyboardOpen && !(showCalls && callView === 'active')
 
   return (
     <div className="flex h-dvh bg-bg text-ink overflow-hidden">
@@ -172,39 +175,41 @@ export default function App() {
           <TaskList
             onOpenTask={openTask}
             onNewTask={newTask}
-            onVoice={() => setVoiceOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
             onBrowse={() => setBrowsing(true)}
           />
         )}
 
-        {/* Phone: speak and add, above the tab bar. */}
-        {!showCalls && !browsing && !keyboardOpen && (
-          <div className="md:hidden fixed right-4 bottom-[calc(84px+env(safe-area-inset-bottom,0px))] z-30 flex flex-col items-center gap-3">
+        {/* The assistant, on every screen (speak or type); on phones, above the tab bar with + on task screens. */}
+        {showFab && (
+          <div className="fixed right-4 bottom-[calc(84px+env(safe-area-inset-bottom,0px))] md:right-6 md:bottom-6 z-30 flex flex-col items-center gap-3">
             <button
               type="button"
               onClick={() => setVoiceOpen(true)}
               disabled={voiceOpen}
-              aria-label="Speak a task or a call"
-              className="w-12 h-12 rounded-full bg-surface shadow-pop flex items-center justify-center text-accent active:scale-95 transition-transform"
+              aria-label="Ask the assistant: speak or type"
+              title="Ask the assistant"
+              className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-surface shadow-pop flex items-center justify-center text-accent active:scale-95 transition-transform"
             >
               <Mic size={20} />
             </button>
-            <button
-              type="button"
-              onClick={newTask}
-              aria-label="New task"
-              className="w-14 h-14 rounded-2xl bg-accent text-accent-ink shadow-pop flex items-center justify-center active:scale-95 transition-transform"
-            >
-              <Plus size={24} />
-            </button>
+            {!showCalls && !browsing && (
+              <button
+                type="button"
+                onClick={newTask}
+                aria-label="New task"
+                className="md:hidden w-14 h-14 rounded-2xl bg-accent text-accent-ink shadow-pop flex items-center justify-center active:scale-95 transition-transform"
+              >
+                <Plus size={24} />
+              </button>
+            )}
           </div>
         )}
 
         {toast && (
           // Phones: above the tab bar, and left of the + and microphone buttons when they're showing.
-          <div role="status" className={`fixed z-[70] left-4 bottom-[calc(6rem+env(safe-area-inset-bottom,0px))] md:left-auto md:right-6 md:bottom-6 md:w-96 flex items-center gap-3 rounded-xl pl-4 pr-2 py-2 min-h-[44px] text-sm shadow-pop fade-in bg-ink text-bg ${
-            !showCalls && !browsing && !keyboardOpen ? 'right-[88px]' : 'right-4'
+          <div role="status" className={`fixed z-[70] left-4 bottom-[calc(6rem+env(safe-area-inset-bottom,0px))] md:left-auto md:bottom-6 md:w-96 flex items-center gap-3 rounded-xl pl-4 pr-2 py-2 min-h-[44px] text-sm shadow-pop fade-in bg-ink text-bg ${
+            showFab ? 'right-[88px] md:right-[104px]' : 'right-4 md:right-6'
           }`}>
             <span className="flex-1 py-1">{toast.message}</span>
             {toast.action && (

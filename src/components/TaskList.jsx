@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ChevronLeft, ChevronRight, Loader2, Mic, Pencil, Plus, Settings, CornerDownLeft } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Settings, CornerDownLeft } from 'lucide-react'
 import { useTaskStore } from '../store/useTaskStore'
 import { groupView, openCount, viewName } from '../lib/views'
 import { parseSpokenTask } from '../lib/voiceTask'
@@ -15,7 +15,7 @@ const EMPTY = {
   all: ['No tasks yet', 'Add your first one below.'],
 }
 
-export default function TaskList({ onOpenTask, onNewTask, onVoice, onOpenSettings, onBrowse }) {
+export default function TaskList({ onOpenTask, onNewTask, onOpenSettings, onBrowse }) {
   const { selectedList, lists, tasks } = useTaskStore()
   const [showDone, setShowDone] = useState(false)
   const [editingList, setEditingList] = useState(false)
@@ -56,7 +56,6 @@ export default function TaskList({ onOpenTask, onNewTask, onVoice, onOpenSetting
             </p>
           </div>
           <div className="hidden md:flex items-center gap-2 pb-1">
-            <Button variant="secondary" size="sm" onClick={onVoice}><Mic size={15} />Speak</Button>
             <Button variant="primary" size="sm" onClick={onNewTask}><Plus size={15} />New task</Button>
           </div>
           <IconButton label="Settings" onClick={onOpenSettings} className="md:hidden -mr-2 mb-0.5">
