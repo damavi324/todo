@@ -16,6 +16,7 @@ import { generatePlan, normalizePlan, cleanSkills } from './planner.js';
 import { accountUsage } from './usage.js';
 import { VOICES, voiceById, voiceSample } from './voiceSamples.js';
 import { interpret, parseTask } from './assistant.js';
+import { LANGUAGES, cleanLanguage, languageProblem } from './language.js';
 import { ensureTwimlApp, validTwilioSignature } from './twilio.js';
 import { openLiveTranscriber } from './deepgram.js';
 
@@ -256,7 +257,12 @@ async function route(req, res) {
   }
   if (p.startsWith('/api/') && !isAuthed(req)) return send(res, 401, { error: 'Login required' });
   if (p === '/api/voices' && method === 'GET') {
-    return send(res, 200, { voices: VOICES.map(({ id, label }) => ({ id, label })), default: config.deepgram.agentVoice });
+    return send(res, 200, {
+      voices: VOICES.map(({ id, label }) => ({ id, label })),
+      default: config.deepgram.agentVoice,
+      // Languages the agent can call in; ready is false (with why) when the server is missing what one needs.
+      languages: LANGUAGES.map(({ id, label }) => ({ id, label, ready: !languageProblem(id), problem: languageProblem(id) })),
+    });
   }
   const vm = p.match(/^\/api\/voices\/([a-z0-9-]+)\/sample$/);
   if (vm && method === 'GET') {
@@ -328,10 +334,12 @@ async function route(req, res) {
     const to = toE164(body.to);
     if (!to) return send(res, 400, { error: 'Enter a valid phone number' });
     if (!String(body.goal || '').trim()) return send(res, 400, { error: 'Tell the agent what the call is for' });
+    // Say so before spending tokens on a plan for a call that can't be made.
+    if (languageProblem(cleanLanguage(body.language))) return send(res, 400, { error: languageProblem(cleanLanguage(body.language)) });
     try {
       log(`[plan] writing call plan (${String(body.brief || '').length} chars of details)`);
       const usage = {};
-      const plan = await generatePlan({ to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, skills: body.skills, usage });
+      const plan = await generatePlan({ to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, skills: body.skills, usage, language: cleanLanguage(body.language) });
       log(`[plan] ready: ${plan.objective}`);
       return send(res, 200, { plan, usage });
     } catch (err) {
@@ -352,7 +360,10 @@ async function route(req, res) {
     body.goal = String(body.goal || '').slice(0, 2000);
     body.brief = String(body.brief || '').slice(0, 40000);
     if (mode === 'agent' && !body.goal?.trim()) return send(res, 400, { error: 'Tell the agent what the call is for' });
-    const s = createSession({ mode, to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '' });
+    // Only the AI agent speaks a language; a call you make yourself is always transcribed in English.
+    const language = mode === 'agent' ? cleanLanguage(body.language) : 'en';
+    if (languageProblem(language)) return send(res, 400, { error: languageProblem(language) });
+    const s = createSession({ mode, to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', language });
     if (mode === 'agent') {
       logCallerId(s, to);
       try {

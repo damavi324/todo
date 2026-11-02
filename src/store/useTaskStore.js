@@ -27,6 +27,8 @@ export const DEFAULT_SETTINGS = {
   useSkills: true,
   // The assistant's voice on calls (a Deepgram voice id); empty = the calling server's default.
   callVoice: '',
+  // The language the assistant speaks on calls by default: 'en' or 'ne' (Nepali). The call form can change it per call.
+  callLanguage: 'en',
   callSkills: DEFAULT_SKILLS,
   // Empty means the phone's best voice for its language.
   voiceName: '',

@@ -3,6 +3,7 @@
 // script to recite word for word.
 import { config } from './config.js';
 import { complete, parseJson } from './claude.js';
+import { plannerLanguageNote } from './language.js';
 
 const MAX_DETAILS = 40000; // characters sent to the planner
 
@@ -24,7 +25,7 @@ const SCHEMA = `{
   "missing_info": ["things the business will probably ask that the details do not answer"]
 }`;
 
-export function plannerSystem(owner = config.ownerName, skills = []) {
+export function plannerSystem(owner = config.ownerName, skills = [], language = 'en') {
   return [
     `You are the call planner for ${owner}'s personal assistant. An AI voice agent named ${config.assistantName} will phone someone on ${owner}'s behalf, and your plan is its briefing.`,
     `Read ${owner}'s standing details and the note for this call. The standing details are true on every call. The note is only for this call. Either may be long, rambling, or dictated by voice with transcription errors; extract what matters and ignore filler.`,
@@ -39,11 +40,12 @@ export function plannerSystem(owner = config.ownerName, skills = []) {
       ? `${owner.toUpperCase()}'S SKILLS (how ${owner} wants every call handled; follow them, and where they conflict with the rules above, they win, except never invent facts):\n${skills.map((x) => `- ${x}`).join('\n')}\n` +
         'If a skill says how to open the call, write that first line in greeting, filled in with the real name of the person or business and the reason, and keep opening to what comes after it.'
       : 'Leave greeting empty.',
+    plannerLanguageNote(language),
     `Reply ONLY with JSON in this shape:\n${SCHEMA}`,
   ].join('\n');
 }
 
-export async function generatePlan({ to, goal, brief, owner, about, skills, usage }) {
+export async function generatePlan({ to, goal, brief, owner, about, skills, usage, language }) {
   const name = String(owner || '').trim() || config.ownerName;
   const standing = String(about || '').trim().slice(0, 8000);
   const details = String(brief || goal || '').slice(0, MAX_DETAILS);
@@ -51,10 +53,10 @@ export async function generatePlan({ to, goal, brief, owner, about, skills, usag
   const prompt = `Phone number being called: ${to}\n\nAbout ${name} (true on every call; do not ask the other person for these):\n${standing || '(none)'}\n\nThis call only:\n${details || '(not given)'}`;
   let text;
   try {
-    text = await complete({ model: config.anthropic.smartModel, system: plannerSystem(name, skillList), prompt, maxTokens: 1800, timeoutMs: 60000, usage });
+    text = await complete({ model: config.anthropic.smartModel, system: plannerSystem(name, skillList, language), prompt, maxTokens: 1800, timeoutMs: 60000, usage });
   } catch (err) {
     // Fall back to the fast model so a slow or unavailable model never blocks the call.
-    text = await complete({ model: config.anthropic.fastModel, system: plannerSystem(name, skillList), prompt, maxTokens: 1800, timeoutMs: 30000, usage });
+    text = await complete({ model: config.anthropic.fastModel, system: plannerSystem(name, skillList, language), prompt, maxTokens: 1800, timeoutMs: 30000, usage });
   }
   const plan = normalizePlan(parseJson(text));
   if (!plan) throw new Error('Could not build a call plan from the details. Try rephrasing the goal.');

@@ -140,6 +140,11 @@ const MODES = [
   { value: 'agent', label: 'Assistant calls', icon: <Bot size={14} /> },
   { value: 'copilot', label: 'I’ll talk', icon: <UserRound size={14} /> },
 ]
+// The language the assistant speaks on the call (Nepali needs ElevenLabs set up on the calling server).
+const LANGUAGES = [
+  { value: 'en', label: 'English' },
+  { value: 'ne', label: 'नेपाली' },
+]
 
 /** The form starts from the draft it was opened with (a redial, a task's call); the screen remounts it per draft. */
 function Compose() {
@@ -147,6 +152,7 @@ function Compose() {
   const contacts = useTaskStore((s) => s.contacts)
   const [draft] = useState(() => useCallStore.getState().draft)
   const [mode, setMode] = useState(draft?.mode || 'agent')
+  const [language, setLanguage] = useState(() => draft?.language || useTaskStore.getState().settings.callLanguage || 'en')
   const [to, setTo] = useState(draft?.to ? formatNumber(draft.to) || draft.to : '')
   const [text, setText] = useState(callText(draft))
   const [busy, setBusy] = useState('')
@@ -188,7 +194,7 @@ function Compose() {
   const go = async (fields, { handsFree = false } = {}) => {
     setError('')
     const note = fields.text.trim()
-    const body = { mode: fields.mode, to: resolveTo(fields.to), goal: note, brief: note }
+    const body = { mode: fields.mode, to: resolveTo(fields.to), goal: note, brief: note, language: fields.mode === 'agent' ? fields.language || language : 'en' }
     useCallStore.setState({ handsFree })
     try {
       if (fields.mode === 'agent') {
@@ -288,6 +294,12 @@ function Compose() {
               ? `${assistantName()} makes the call for you, checks with you before agreeing to anything new, and you can join anytime.`
               : 'You talk. The assistant listens, suggests what to say, and writes up the call.'}
           </p>
+          {mode === 'agent' && (
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-xs text-ink-3 px-1 flex-shrink-0">Speaks</span>
+              <div className="flex-1"><Segmented size="sm" value={language} onChange={setLanguage} options={LANGUAGES} /></div>
+            </div>
+          )}
         </div>
 
         <div className="relative">
@@ -400,7 +412,7 @@ function PlanView() {
         <Button variant="primary" onClick={call} disabled={busy} className="flex-[2] h-11">
           {busy ? <Loader2 size={17} className="animate-spin" /> : <Phone size={17} />}Call now
         </Button>
-        <Button onClick={() => setDraft({ mode: pending.mode, to: pending.to, goal: pending.goal, brief: pending.brief })} className="flex-1 h-11">
+        <Button onClick={() => setDraft({ mode: pending.mode, to: pending.to, goal: pending.goal, brief: pending.brief, language: pending.language })} className="flex-1 h-11">
           <Pencil size={15} />Edit
         </Button>
       </div>

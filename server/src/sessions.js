@@ -103,7 +103,7 @@ export function slog(s, level, text) {
   persist(s);
 }
 
-export function createSession({ mode, to, goal, brief, plan, owner, about, localNow, skills = [], planUsage, voice = '' }) {
+export function createSession({ mode, to, goal, brief, plan, owner, about, localNow, skills = [], planUsage, voice = '', language = 'en' }) {
   const s = {
     id: crypto.randomUUID(),
     mode, // 'copilot' | 'agent'
@@ -118,6 +118,7 @@ export function createSession({ mode, to, goal, brief, plan, owner, about, local
     plan: plan || null,
     skills,
     voice, // the voice picked in the app for this call; empty = the server's default
+    language, // what the agent speaks on the call: 'en' or 'ne' (Nepali)
     // What this call used: Claude tokens per model (call plan, live tips, notes) and how long it lasted.
     usage: { claude: cleanUsage(planUsage), seconds: 0 },
     status: 'starting',
@@ -389,6 +390,7 @@ async function summarize(s) {
       timeoutMs: 30000,
       system:
         `You write post-call notes for ${s.ownerName || config.ownerName}'s personal assistant. Be factual; never invent details not in the transcript. ` +
+        (s.language === 'ne' ? 'The call was in Nepali; write the notes in English, keeping names, dates, numbers and prices exact. ' : '') +
         'appointments lists only things actually booked or agreed on the call that happen at a set day (and time, if one was agreed): use YYYY-MM-DD and 24-hour HH:mm, worked out from the owner\'s current date, and "" for an unknown time. ' +
         'action_items are follow-ups the owner still has to do; give each a due date only if one was said. ' +
         'callback_after is set only when the call should be tried again later (no answer, busy, closed, asked to call back): "1h", "tomorrow" or a YYYY-MM-DD date; otherwise "". ' +

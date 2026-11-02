@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import { config, publicWss } from './config.js';
-import { openLiveTranscriber, openVoiceAgent, listenProvider, speakConfig, thinkConfig } from './deepgram.js';
+import { openLiveTranscriber, openVoiceAgent, listenProvider, speakConfig, thinkConfig, nepaliListenProvider, elevenLabsSpeak } from './deepgram.js';
+import { lines, languagePrompt } from './language.js';
 import { hangupCall, updateCall, twiml, streamParams, xml } from './twilio.js';
 import { dtmfMulaw, frames } from './dtmf.js';
 import { planToPrompt } from './planner.js';
@@ -74,6 +75,7 @@ function agentPrompt(s) {
   return [
     `You are ${config.assistantName}, an AI assistant placing a phone call on behalf of ${owner}. You are speaking on a live phone call.`,
     '',
+    languagePrompt(s.language, owner),
     s.about ? `ABOUT ${owner.toUpperCase()} (true on every call; use these facts, and do not ask the other person for them):\n${s.about}\n` : '',
     `THIS CALL: ${s.goal || 'See context.'}`,
     s.plan ? planToPrompt(s.plan, owner) : '',
@@ -97,7 +99,7 @@ function agentPrompt(s) {
     '- No lists, no markdown, no emojis, no stage directions.',
     '- This is a live conversation. Respond to what they actually said; the plan is guidance, not lines to recite. If they offer something new, use judgment within your limits.',
     `- Your first line says you are an AI assistant calling for ${owner}. If asked again whether you are an AI, say yes, plainly. Never claim to be human.`,
-    greetingOf(s).includes('transcribed') ? '' : '- Your first line does not mention transcription. In your next turn, say "Just so you know, this call is being transcribed." and then go straight into why you are calling.',
+    greetingOf(s).includes(lines(s.language).transcribedMark) ? '' : `- Your first line does not mention transcription. In your next turn, say "${lines(s.language).transcribed}" and then go straight into why you are calling.`,
     '',
     'WHO YOU ARE CALLING',
     `- If the goal or details name a specific person ${owner} already knows, this is a personal call. Do not ask "what's your name?" You already know who they are. If a different person answers, ask to speak to the person you called.`,
@@ -125,13 +127,15 @@ function agentPrompt(s) {
  */
 export function greetingOf(s) {
   const owner = s.ownerName || config.ownerName;
+  const L = lines(s.language);
   const g = s.plan?.greeting;
-  if (g) return /\bAI\b/.test(g) ? g : `Hi, this is ${config.assistantName}, an AI assistant. ${g.replace(/^(hi|hello)[,!.]?\s*/i, '')}`;
-  return `Hi, this is ${config.assistantName}, an AI assistant calling on behalf of ${owner}. This call is being transcribed. ${s.plan?.opening || ''}`.trim();
+  if (g) return L.hasAi(g) ? g : `${L.introShort(config.assistantName)} ${L.stripHello(g)}`;
+  return `${L.intro(config.assistantName, owner)} ${s.plan?.opening || ''}`.trim();
 }
 
 function agentSettings(s) {
   const d = config.deepgram;
+  const nepali = s.language === 'ne';
   return {
     type: 'Settings',
     audio: {
@@ -139,8 +143,9 @@ function agentSettings(s) {
       output: { encoding: 'mulaw', sample_rate: 8000, container: 'none' },
     },
     agent: {
-      language: 'en',
-      listen: { provider: listenProvider(d.agentListenModel) },
+      // Nepali: Flux has no Nepali, so Nova-3 listens; the language lives on the listen and speak providers.
+      ...(nepali ? {} : { language: 'en' }),
+      listen: { provider: nepali ? nepaliListenProvider() : listenProvider(d.agentListenModel) },
       think: {
         ...thinkConfig(),
         prompt: agentPrompt(s),
@@ -181,7 +186,7 @@ function agentSettings(s) {
         ],
       },
       // No greeting: the first line is spoken after they say hello (see the prompt and the hello timer).
-      speak: speakConfig(voiceById(s.voice)?.o),
+      speak: nepali ? elevenLabsSpeak() : speakConfig(voiceById(s.voice)?.o),
     },
   };
 }
@@ -229,8 +234,8 @@ export function handleAgentStream(twilioWs) {
       // The owner may need a moment to see the question. Don't leave the other person in silence: thank
       // them for holding now and then, and give the owner time to answer before moving on.
       const reassure = [
-        setTimeout(() => sendAgent({ type: 'InjectAgentMessage', message: 'Thanks for holding, I’m still checking on that.' }), 20000),
-        setTimeout(() => sendAgent({ type: 'InjectAgentMessage', message: 'Sorry for the wait, just a few more seconds.' }), 55000),
+        setTimeout(() => sendAgent({ type: 'InjectAgentMessage', message: lines(session.language).holding }), 20000),
+        setTimeout(() => sendAgent({ type: 'InjectAgentMessage', message: lines(session.language).holdingLonger }), 55000),
       ];
       const answer = await askOwner(session, args.question || 'Can you help?', OWNER_ANSWER_MS);
       reassure.forEach(clearTimeout);
@@ -372,7 +377,7 @@ export function handleAgentStream(twilioWs) {
 // =====================================================================
 export async function joinAgentCall(s) {
   if (!s.callSid) throw new Error('Call is not connected yet');
-  s._agent?.say(`One moment, I'm connecting ${s.ownerName || config.ownerName} to the call now.`);
+  s._agent?.say(lines(s.language).connecting(s.ownerName || config.ownerName));
   emit(s, 'agent_state', { state: 'handing_off' });
   await new Promise((r) => setTimeout(r, 3500));
   s.joined = true;

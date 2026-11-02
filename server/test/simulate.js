@@ -145,6 +145,8 @@ const env = {
   DEEPGRAM_AGENT_URL: `ws://localhost:${PORTS.agent}/v1/agent/converse`,
   ANTHROPIC_API_KEY: 'sk-ant-test',
   ANTHROPIC_BASE_URL: `http://localhost:${PORTS.claude}`,
+  ELEVENLABS_API_KEY: 'xi_test',
+  ELEVENLABS_VOICE_ID_NE: 'voice_ne',
 };
 const app = spawn(process.execPath, ['src/server.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let appOut = '';
@@ -515,6 +517,55 @@ try {
   r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550133', goal: 'x', voice: 'evil<voice>' } });
   assert.equal(r.json.session.voice, '', 'unknown voices are ignored');
   pass('Voice picker: the app can list voices, and only known voices reach a call');
+
+  // ---- Nepali calls ----
+  r = await req('/api/voices');
+  assert.deepEqual(r.json.languages.map((l) => [l.id, l.ready]), [['en', true], ['ne', true]], 'Nepali is offered once ElevenLabs is set up');
+  claudeRequests.length = 0;
+  r = await req('/api/plan', { method: 'POST', body: { to: '2145550188', goal: 'Book a table for four', language: 'ne' } });
+  assert.equal(r.status, 200);
+  assert.match(claudeRequests.at(-1).json.system, /This call will be in Nepali. Write greeting, opening and if_voicemail in natural, polite spoken Nepali/);
+  r = await req('/api/plan', { method: 'POST', body: { to: '2145550188', goal: 'Book a table', language: 'en' } });
+  assert.doesNotMatch(claudeRequests.at(-1).json.system, /Nepali/, 'English plans are unchanged');
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550188', goal: 'Book a table for four', owner: 'Manoj', language: 'ne', voice: 'flux-wes-en' } });
+  const agNe = r.json.session;
+  assert.equal(agNe.language, 'ne');
+  const twNe = new WebSocket(`ws://localhost:${PORTS.app}/streams/agent`);
+  await new Promise((res) => twNe.on('open', res));
+  agentLog.settings = null;
+  agentLog.injected.length = 0;
+  twNe.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_NE', callSid: agNe.callSid, customParameters: { sessionId: agNe.id } } }));
+  await waitFor(() => agentLog.settings, 'Nepali agent settings');
+  const ne = agentLog.settings.agent;
+  assert.equal(ne.language, undefined, 'no English language flag on a Nepali call');
+  assert.deepEqual(ne.listen.provider, { type: 'deepgram', model: 'nova-3', language: 'ne' }, 'Nova-3 Nepali listens (Flux has no Nepali)');
+  assert.ok(Array.isArray(ne.speak), 'ElevenLabs with a fallback');
+  assert.deepEqual(ne.speak[0], {
+    provider: { type: 'eleven_labs', model_id: 'eleven_v4_turbo', language_code: 'ne' },
+    endpoint: { url: 'wss://api.elevenlabs.io/v1/text-to-speech/voice_ne/multi-stream-input', headers: { 'xi-api-key': 'xi_test' } },
+  });
+  assert.equal(ne.speak[1].provider.model_id, 'eleven_v3');
+  assert.equal(ne.speak[1].endpoint.url, 'https://api.elevenlabs.io/v1/text-to-speech/voice_ne');
+  assert.match(ne.think.prompt, /LANGUAGE: NEPALI/);
+  assert.match(ne.think.prompt, /never Hindi words/);
+  assert.ok(ne.think.prompt.includes('word for word: "नमस्ते, म Pilot, Manojको तर्फबाट फोन गरेको एआई सहायक हुँ।'), 'the first line is in Nepali');
+  assert.doesNotMatch(ne.think.prompt, /In your next turn, say/, 'the Nepali first line already says the call is recorded');
+  await waitFor(() => agentLog.injected.some((m) => /^नमस्ते, म Pilot/.test(m)), 'Nepali opener after no hello', 4000);
+  twNe.close();
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'copilot', to: '+12145550187', language: 'ne' } });
+  assert.equal(r.json.session.language, 'en', 'calls you make yourself stay English');
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550186', goal: 'x', language: 'klingon' } });
+  assert.equal(r.json.session.language, 'en', 'unknown languages fall back to English');
+
+  process.env.CALLPILOT_ENV_FILE = envFile; // so importing the config below reads no real .env
+  const { config: cfg } = await import('../src/config.js');
+  const { languageProblem } = await import('../src/language.js');
+  const { elevenLabsSpeak } = await import('../src/deepgram.js');
+  cfg.elevenlabs.apiKey = '';
+  assert.match(languageProblem('ne'), /ELEVENLABS_API_KEY/);
+  assert.equal(languageProblem('en'), '');
+  assert.equal(elevenLabsSpeak({ apiKey: 'k', voiceId: 'v', model: 'eleven_v4_turbo', fallbackModel: 'off' }).provider.model_id, 'eleven_v4_turbo', 'fallback can be turned off');
+  pass('Nepali calls: Nova-3 Nepali ears, ElevenLabs voice, Nepali first line and plan; English calls unchanged');
 
   r = await req('/api/usage');
   assert.equal(r.status, 200);

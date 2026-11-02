@@ -131,6 +131,28 @@ export function thinkConfig(override = {}) {
   return think;
 }
 
+/** The agent's ears on a Nepali call: Nova-3 with its Nepali model (Nova's own endpointing decides turns). */
+export function nepaliListenProvider() {
+  return { ...deepgramProvider(config.deepgram.nepaliListenModel), language: 'ne' };
+}
+
+/**
+ * The agent's voice on a Nepali call: ElevenLabs over its streaming socket, with an optional slower
+ * model over HTTPS as a fallback (Deepgram tries the next entry if one fails).
+ */
+export function elevenLabsSpeak(el = config.elevenlabs) {
+  const headers = { 'xi-api-key': el.apiKey };
+  const base = `api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(el.voiceId)}`;
+  const out = [{
+    provider: { type: 'eleven_labs', model_id: el.model, language_code: 'ne' },
+    endpoint: { url: `wss://${base}/multi-stream-input`, headers },
+  }];
+  if (el.fallbackModel && el.fallbackModel !== 'off' && el.fallbackModel !== el.model) {
+    out.push({ provider: { type: 'eleven_labs', model_id: el.fallbackModel, language_code: 'ne' }, endpoint: { url: `https://${base}`, headers } });
+  }
+  return out.length === 1 ? out[0] : out;
+}
+
 /**
  * The agent's voice. Flux voices get speed + expressivity (more animated delivery).
  * Cartesia (managed by Deepgram) falls back to a Flux voice if it ever fails.
