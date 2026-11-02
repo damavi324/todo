@@ -11,7 +11,16 @@
 const APP_PROJECT_WEB_CLIENT_ID = '1045816829488-ntelsjmkgkacjhdm219p28nodme5vrun.apps.googleusercontent.com'
 export const GOOGLE_PROJECT_NUMBER = '1045816829488'
 
-export const GOOGLE_WEB_CLIENT_ID = (import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID || APP_PROJECT_WEB_CLIENT_ID).trim()
+// Firebase only accepts Google tokens from its own project's clients, and Android sign-in needs the Web
+// and Android clients in one project. A Web client ID from another project (an old .env.local) can never
+// work, so it is ignored in favour of this project's.
+const envWebClientId = (import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID || '').trim()
+if (envWebClientId && !envWebClientId.startsWith(`${GOOGLE_PROJECT_NUMBER}-`)) {
+  console.warn(`VITE_GOOGLE_WEB_CLIENT_ID is not from project ${GOOGLE_PROJECT_NUMBER} (todo-88bb6); using that project's Web client instead.`)
+}
+export const GOOGLE_WEB_CLIENT_ID = envWebClientId.startsWith(`${GOOGLE_PROJECT_NUMBER}-`)
+  ? envWebClientId
+  : APP_PROJECT_WEB_CLIENT_ID
 
 export const CALENDAR_SCOPES = [
   'openid',
