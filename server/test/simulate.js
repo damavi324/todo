@@ -38,6 +38,10 @@ const claudeServer = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
+    if (req.url.startsWith('/v1/organizations/cost_report')) {
+      res.writeHead(req.headers['x-api-key'] === 'sk-ant-admin01-test' ? 200 : 401, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ data: [{ results: [{ amount: '1234.5', currency: 'USD' }] }, { results: [{ amount: '100', currency: 'USD' }] }], has_more: false }));
+    }
     const json = JSON.parse(body);
     claudeRequests.push({ json, headers: req.headers });
     const isSummary = /post-call/.test(json.system);
@@ -123,6 +127,7 @@ const env = {
   PUBLIC_HOST: `localhost:${PORTS.app}`,
   APP_PASSCODE: 'letmein',
   OWNER_NAME: 'Mk',
+  ANTHROPIC_ADMIN_KEY: 'sk-ant-admin01-test',
   ASSISTANT_NAME: 'Pilot',
   CLIENT_IDENTITY: 'owner',
   TWILIO_ACCOUNT_SID: 'AC_TEST',
@@ -488,6 +493,7 @@ try {
   r = await req('/api/usage');
   assert.equal(r.status, 200);
   assert.ok('twilio' in r.json && 'deepgram' in r.json && r.json.models.smart === 'claude-sonnet-5-5');
+  assert.deepEqual(r.json.anthropic, { spentThisMonth: 13.345, currency: 'USD' }, 'Anthropic cost report: cents summed into dollars');
   pass('Usage page: provider balances come back (or each provider\'s error)');
 
   // Twilio says a machine answered: the agent is told, the transcript says so, and the notes say voicemail.

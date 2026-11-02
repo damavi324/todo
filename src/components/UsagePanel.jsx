@@ -44,17 +44,28 @@ export default function UsagePanel({ onClose }) {
             <p className="text-xs text-warn mb-2">Couldn’t get balances from the calling server ({accounts.error}). If it says “Not found”, the server needs the latest update.</p>
           )}
             <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-3 gap-2">
-              <Balance name="Twilio" hint="Phone line, per minute of each call" data={accounts?.error ? { error: 'Not available' } : accounts?.twilio} loading={loading && !accounts}
+              <Balance name="Twilio" hint="Phone line: per minute, plus the number" data={accounts?.error ? { error: 'Not available' } : accounts?.twilio} loading={loading && !accounts}
                 extra={accounts?.twilio?.spentThisMonth != null && `${money(accounts.twilio.spentThisMonth, accounts.twilio.currency)} spent this month`}
                 link="https://console.twilio.com/us1/billing/manage-billing/billing-overview" />
-              <Balance name="Deepgram" hint="Voice: listening and speaking, per minute" data={accounts?.error ? { error: 'Not available' } : accounts?.deepgram} loading={loading && !accounts}
+              <Balance name="Deepgram" hint="Voice AI: listening, speaking and the assistant on calls, per minute" data={accounts?.error ? { error: 'Not available' } : accounts?.deepgram} loading={loading && !accounts}
                 link="https://console.deepgram.com/billing" />
               <div className="rounded-xl bg-surface-2 px-4 py-3">
-                <p className="text-sm font-medium text-ink">Claude</p>
+                <p className="text-sm font-medium text-ink">Anthropic (Claude)</p>
                 <p className="text-xs text-ink-3">Plans, live tips, notes, per token</p>
-                <p className="text-lg font-semibold text-ink mt-1 tabular-nums">≈ {money(claude)}</p>
-                <p className="text-xs text-ink-3">{range === 'month' ? 'this month' : 'all time'}, counted by this app</p>
-                <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-accent mt-1">Credit balance<ExternalLink size={11} /></a>
+                {Number.isFinite(accounts?.anthropic?.spentThisMonth) ? (
+                  <>
+                    <p className="text-lg font-semibold text-ink mt-1 tabular-nums">{money(accounts.anthropic.spentThisMonth)}</p>
+                    <p className="text-xs text-ink-3">spent this month, all your Anthropic use</p>
+                    <p className="text-xs text-ink-3">≈ {money(claude)} of it from this app {range === 'month' ? 'this month' : 'all time'}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-lg font-semibold text-ink mt-1 tabular-nums">≈ {money(claude)}</p>
+                    <p className="text-xs text-ink-3">{range === 'month' ? 'this month' : 'all time'}, counted by this app</p>
+                    {accounts?.anthropic?.error && <p className="text-xs text-ink-3">{accounts.anthropic.error}</p>}
+                  </>
+                )}
+                <a href="https://platform.claude.com/settings/billing" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-accent mt-1">Credit balance<ExternalLink size={11} /></a>
               </div>
             </div>
         </section>

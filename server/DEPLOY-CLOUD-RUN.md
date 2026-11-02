@@ -29,6 +29,8 @@ selected project at the top.
      Environment): `APP_PASSCODE`, `OWNER_NAME`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
      `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`, `TWILIO_TWIML_APP_SID`, `TWILIO_PHONE_NUMBER`,
      `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY`, plus `TWILIO_CALLER_ID` if you set one.
+     Optional: `ANTHROPIC_ADMIN_KEY` (an Admin key, `sk-ant-admin01-…`) so the app's Usage page shows your
+     real Anthropic spend this month. Admin keys need an organization in the Claude Console.
 4. **Create**. The first build takes about 5 minutes. Copy the service URL (`https://callpilot-….run.app`).
 5. **In the app**: Settings → Calling → paste that URL and your passcode → **Connect**. Because settings
    sync, your phone and the web both switch over.
