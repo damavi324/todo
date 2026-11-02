@@ -103,7 +103,7 @@ export function slog(s, level, text) {
   persist(s);
 }
 
-export function createSession({ mode, to, goal, brief, plan, owner, about, localNow, skills = [], planUsage }) {
+export function createSession({ mode, to, goal, brief, plan, owner, about, localNow, skills = [], planUsage, voice = '' }) {
   const s = {
     id: crypto.randomUUID(),
     mode, // 'copilot' | 'agent'
@@ -117,6 +117,7 @@ export function createSession({ mode, to, goal, brief, plan, owner, about, local
     brief: (brief || '').trim(),
     plan: plan || null,
     skills,
+    voice, // the voice picked in the app for this call; empty = the server's default
     // What this call used: Claude tokens per model (call plan, live tips, notes) and how long it lasted.
     usage: { claude: cleanUsage(planUsage), seconds: 0 },
     status: 'starting',

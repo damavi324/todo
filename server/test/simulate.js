@@ -485,7 +485,7 @@ try {
   r = await req('/api/plan', { method: 'POST', body: { to: '2145550199', goal: 'Dinner Friday', brief: 'Calling: John', owner: 'Mr. Manoj Khanal', skills } });
   assert.match(claudeRequests.at(-1).json.system, /MR\. MANOJ KHANAL'S SKILLS[^]*- Open with: Hi, I am trying to reach/);
   const skillPlan = { ...plan, greeting: 'Hi, I am trying to reach John regarding dinner on Friday, on behalf of Mr. Manoj Khanal.' };
-  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550144', goal: 'Dinner Friday', plan: skillPlan, owner: 'Mr. Manoj Khanal', skills, planUsage: { 'claude-sonnet-5-5': { in: 1000, out: 200, calls: 1 }, 'bad model!': { in: 5 } } } });
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550144', goal: 'Dinner Friday', plan: skillPlan, owner: 'Mr. Manoj Khanal', skills, voice: 'flux-wes-en', planUsage: { 'claude-sonnet-5-5': { in: 1000, out: 200, calls: 1 }, 'bad model!': { in: 5 } } } });
   const ag4 = r.json.session;
   assert.deepEqual(ag4.usage.claude, { 'claude-sonnet-5-5': { in: 1000, out: 200, calls: 1 } }, 'plan tokens are kept with the call; junk dropped');
   const tw4 = new WebSocket(`ws://localhost:${PORTS.app}/streams/agent`);
@@ -496,6 +496,7 @@ try {
   assert.ok(agentLog.settings.agent.think.prompt.includes('word for word: "Hi, this is Pilot, an AI assistant. I am trying to reach John regarding dinner on Friday, on behalf of Mr. Manoj Khanal."'));
   assert.match(agentLog.settings.agent.think.prompt, /SKILLS \(follow these on every call\):\n- Open with/);
   assert.match(agentLog.settings.agent.think.prompt, /Just so you know, this call is being transcribed/);
+  assert.equal(agentLog.settings.agent.speak.provider.model, 'flux-wes-en', 'the voice picked in the app is used on the call');
   tw4.close();
   pass('Call skills: planner and agent follow them, the first line is short and always says it is an AI');
 
@@ -505,6 +506,15 @@ try {
   assert.equal(claudeRequests.at(-1).json.model, 'claude-haiku-5-5', 'task parsing uses the fast, cheap model');
   assert.ok(r.json.usage['claude-haiku-5-5']);
   pass('Spoken task parsing runs on Claude Haiku and reports its tokens');
+
+  r = await req('/api/voices');
+  assert.equal(r.status, 200);
+  assert.ok(r.json.voices.some((v) => v.id === 'flux-wes-en') && r.json.default, 'voice list with the default');
+  r = await req('/api/voices/not-a-voice/sample');
+  assert.equal(r.status, 404);
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550133', goal: 'x', voice: 'evil<voice>' } });
+  assert.equal(r.json.session.voice, '', 'unknown voices are ignored');
+  pass('Voice picker: the app can list voices, and only known voices reach a call');
 
   r = await req('/api/usage');
   assert.equal(r.status, 200);

@@ -137,6 +137,12 @@ export function disconnectCallPilot() {
   useTaskStore.getState().updateSettings({ callpilotToken: '', callpilotConnected: false })
 }
 
+/** A full server address with the passcode in the query, for things that can't send a header (audio players). */
+export function apiUrl(path) {
+  const { url, token } = cpSettings()
+  return `${url}${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+}
+
 export function socketUrl(path) {
   const { url, token } = cpSettings()
   const base = url.replace(/^http/i, 'ws')
@@ -155,6 +161,7 @@ export function callerContext() {
   return {
     owner: (s.userName || '').trim(),
     about: (s.callerAbout || '').trim(),
+    voice: s.callVoice || '',
     skills: s.useSkills === false ? [] : (s.callSkills || []).filter((x) => x.on && x.text?.trim()).map((x) => x.text.trim()),
     // So the call notes can turn "next Tuesday at 9" into a real date.
     localNow: `${now.toLocaleDateString('en-US', { weekday: 'long' })} ${toLocalYMD(now)} ${toLocalHM(now)} ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,

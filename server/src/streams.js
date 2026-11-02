@@ -4,6 +4,7 @@ import { openLiveTranscriber, openVoiceAgent, listenProvider, speakConfig, think
 import { hangupCall, updateCall, twiml, streamParams, xml } from './twilio.js';
 import { dtmfMulaw, frames } from './dtmf.js';
 import { planToPrompt } from './planner.js';
+import { voiceById } from './voiceSamples.js';
 import {
   getSession, setStatus, addLine, emit, utteranceAssembler, askOwner, finalize, markVoicemail,
 } from './sessions.js';
@@ -180,7 +181,7 @@ function agentSettings(s) {
         ],
       },
       // No greeting: the first line is spoken after they say hello (see the prompt and the hello timer).
-      speak: speakConfig(),
+      speak: speakConfig(voiceById(s.voice)?.o),
     },
   };
 }

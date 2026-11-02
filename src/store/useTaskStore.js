@@ -25,6 +25,8 @@ export const DEFAULT_SETTINGS = {
   // Call skills: standing instructions the assistant follows when it plans and makes a call.
   // Turning useSkills off sends none (fewer tokens) and the call uses the standard opening.
   useSkills: true,
+  // The assistant's voice on calls (a Deepgram voice id); empty = the calling server's default.
+  callVoice: '',
   callSkills: DEFAULT_SKILLS,
   // Empty means the phone's best voice for its language.
   voiceName: '',

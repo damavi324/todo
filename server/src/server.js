@@ -14,6 +14,7 @@ import {
 import { handleListenStream, handleAgentStream, joinAgentCall } from './streams.js';
 import { generatePlan, normalizePlan, cleanSkills } from './planner.js';
 import { accountUsage } from './usage.js';
+import { VOICES, voiceById, voiceSample } from './voiceSamples.js';
 import { interpret, parseTask } from './assistant.js';
 import { ensureTwimlApp, validTwilioSignature } from './twilio.js';
 import { openLiveTranscriber } from './deepgram.js';
@@ -254,6 +255,23 @@ async function route(req, res) {
     return send(res, 401, { error: 'Wrong passcode' });
   }
   if (p.startsWith('/api/') && !isAuthed(req)) return send(res, 401, { error: 'Login required' });
+  if (p === '/api/voices' && method === 'GET') {
+    return send(res, 200, { voices: VOICES.map(({ id, label }) => ({ id, label })), default: config.deepgram.agentVoice });
+  }
+  const vm = p.match(/^\/api\/voices\/([a-z0-9-]+)\/sample$/);
+  if (vm && method === 'GET') {
+    const voice = voiceById(vm[1]);
+    if (!voice) return send(res, 404, { error: 'Unknown voice' });
+    const owner = String(url.searchParams.get('owner') || '').replace(/[^\p{L}\p{N} .'-]/gu, '').trim().slice(0, 60) || config.ownerName;
+    const line = `Hi, this is ${config.assistantName}, an AI assistant. I'm trying to reach the front desk regarding an appointment, on behalf of ${owner}. Do you have a minute?`;
+    try {
+      const audio = await voiceSample(voice, line);
+      res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': audio.length, 'Cache-Control': 'private, max-age=86400', ...SECURITY_HEADERS });
+      return res.end(audio);
+    } catch (err) {
+      return send(res, 502, { error: `Could not record that voice: ${err.message}` });
+    }
+  }
   if (p === '/api/usage' && method === 'GET') {
     return send(res, 200, await accountUsage());
   }
@@ -334,7 +352,7 @@ async function route(req, res) {
     body.goal = String(body.goal || '').slice(0, 2000);
     body.brief = String(body.brief || '').slice(0, 40000);
     if (mode === 'agent' && !body.goal?.trim()) return send(res, 400, { error: 'Tell the agent what the call is for' });
-    const s = createSession({ mode, to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage });
+    const s = createSession({ mode, to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '' });
     if (mode === 'agent') {
       logCallerId(s, to);
       try {

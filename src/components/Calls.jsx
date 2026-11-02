@@ -746,13 +746,13 @@ function RecentCalls() {
   const shown = (filter === 'all' ? history : history.filter((h) => callResult(h) === filter)).slice(0, 50)
   const chip = (key, label, n) => (
     <button key={key} onClick={() => setFilter(key)} aria-pressed={filter === key}
-      className={`flex-shrink-0 h-8 px-3 rounded-full text-[13px] font-medium transition-colors ${filter === key ? 'bg-ink text-bg' : 'bg-surface-2 text-ink-2 hover:text-ink'}`}>
+      className={`h-8 px-3 rounded-full text-[13px] font-medium transition-colors ${filter === key ? 'bg-ink text-bg' : 'bg-surface-2 text-ink-2 hover:text-ink'}`}>
       {label} <span className="opacity-60 tabular-nums">{n}</span>
     </button>
   )
   return (
     <>
-    <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 pb-2">
+    <div className="flex flex-wrap gap-1.5 pb-2">
       {chip('all', 'All', history.length)}
       {Object.keys(RESULT).filter((k) => counts[k]).map((k) => chip(k, RESULT[k][0], counts[k]))}
     </div>
