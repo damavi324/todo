@@ -606,7 +606,7 @@ try {
   br = await fetch(base + '/api/assistant', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: 'remind me friday at 9 to have pilot call the dentist at 214 555 0100 to move my cleaning', now: '2026-10-27T20:00', weekday: 'Tuesday', timezone: 'America/Chicago', lists: [{ id: 'inbox', name: 'Inbox' }, { id: 'personal', name: 'Personal' }] }),
+    body: JSON.stringify({ text: 'remind me friday at 9 to have pilot call the dentist at 214 555 0100 to move my cleaning', now: '2026-10-27T20:00', weekday: 'Tuesday', timezone: 'America/Chicago', lists: [{ id: 'inbox', name: 'Inbox' }, { id: 'personal', name: 'Personal' }], contacts: ['Puja Khanal', 'Bright Smiles Dental'] }),
   });
   const { result } = await br.json();
   assert.equal(result.kind, 'both');
@@ -616,6 +616,8 @@ try {
   const aReq = claudeRequests.find((c) => /voice front door/.test(c.json.system));
   assert.equal(aReq.json.model, 'claude-haiku-5-5');
   assert.match(aReq.json.messages[0].content, /Tuesday/);
+  assert.match(aReq.json.messages[0].content, /similar name \(spelling may differ\): Puja Khanal; Bright Smiles Dental\. If they mean one of them, put that exact name in call\.contact/);
+  assert.match(aReq.json.system, /no relationship words or brackets/);
   pass('Voice assistant: one sentence becomes a task with date/time/list plus a call for Pilot');
 
   const appUpdate = twilioCalls.find((c) => c.url === '/2010-04-01/Accounts/AC_TEST/Applications/AP_TEST.json' && c.params.get('VoiceUrl'));

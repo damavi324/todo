@@ -10,6 +10,7 @@ import { PRIORITY_COLOR } from '../lib/views'
 import { useCallStore } from '../store/useCallStore'
 import SpeechCapture from '../plugins/SpeechCapture'
 import { useBack } from '../lib/backStack'
+import { mergeContacts, phoneContacts, pickByName, likelyContacts } from '../lib/phoneContacts'
 
 
 function localNow() {
@@ -68,12 +69,18 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall: hand
         setWaking(false)
         if (!up) throw new Error('The calling server didn’t wake up, so I used the basic parser.')
       }
-      const { result: r, usage } = await cp('/api/assistant', { text: heard, ...callerContext(), ...localNow(), lists: lists.map((l) => ({ id: l.id, name: l.name })) }, { timeoutMs: 45000 })
+      const people = mergeContacts(useTaskStore.getState().contacts, phoneContacts())
+      const { result: r, usage } = await cp('/api/assistant', { text: heard, ...callerContext(), ...localNow(), lists: lists.map((l) => ({ id: l.id, name: l.name })), contacts: likelyContacts(people, heard) }, { timeoutMs: 45000 })
+      // The name it heard, matched to a saved or phone contact, gives the number.
+      if (r.call && !r.call.to && r.call.contact) {
+        const who = pickByName(people, r.call.contact)
+        if (who) r.call = { ...r.call, to: who.phone, contact: who.name }
+      }
       recordOtherUsage('assistant', usage)
       // Single, clear intent: go straight to it.
       if (r.kind === 'task' && r.task) return onTask({ ...r.task, listId: r.task.listId || undefined })
       // A call you said out loud, with who and why: plan it and dial, hands-free (cancel stays one tap away).
-      if (spoken && r.kind === 'call' && r.call && r.call.when !== 'later' && (r.call.to || r.call.contact) && r.call.goal) {
+      if (spoken && r.kind === 'call' && r.call && r.call.when !== 'later' && r.call.to && r.call.goal) {
         return onCall({ ...callDraft(r), autoStart: true })
       }
       setResult(r)

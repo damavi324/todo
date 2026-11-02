@@ -37,6 +37,7 @@ function systemPrompt(owner = config.ownerName) {
     'Rules:',
     '- Resolve relative dates and times ("tomorrow", "next Monday", "in 2 hours", "this evening" = 18:00, "morning" = 09:00 only if they asked for a reminder time) using the current date and time given.',
     '- Never invent phone numbers, names or facts. Leave fields empty when unknown.',
+    '- call.contact is the person or business name only, with no relationship words or brackets ("Pooja", not "Pooja (wife)"); put the relationship in details.',
     '- Fill only the sections that apply; omit or leave empty the other one.',
     '- Keep "say" under 20 words.',
     `Reply ONLY with JSON in this shape:\n${SCHEMA}`,
@@ -45,7 +46,7 @@ function systemPrompt(owner = config.ownerName) {
 
 const s = (v, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
-export async function interpret({ text, now, timezone, weekday, lists, owner, about }, usage) {
+export async function interpret({ text, now, timezone, weekday, lists, owner, about, contacts }, usage) {
   const spoken = s(text, 6000);
   if (!spoken) throw new Error('Nothing was heard');
   const listText = Array.isArray(lists) && lists.length
@@ -56,6 +57,9 @@ export async function interpret({ text, now, timezone, weekday, lists, owner, ab
     `Task lists: ${listText}`,
     '',
     about ? `About ${s(owner, 80) || config.ownerName}, true on every call: ${s(about, 4000)}` : '',
+    Array.isArray(contacts) && contacts.length
+      ? `Contacts on their phone with a similar name (spelling may differ): ${contacts.slice(0, 12).map((c) => s(c, 80)).filter(Boolean).join('; ')}. If they mean one of them, put that exact name in call.contact.`
+      : '',
     `They said: "${spoken}"`,
   ].join('\n');
   const reply = await complete({ model: config.anthropic.fastModel, system: systemPrompt(s(owner, 80) || config.ownerName), prompt, maxTokens: 900, timeoutMs: 25000, usage });

@@ -185,7 +185,14 @@ function Compose() {
   const go = async (fields, { handsFree = false } = {}) => {
     setError('')
     const note = fields.text.trim()
-    const body = { mode: fields.mode, to: resolveTo(fields.to), goal: note, brief: note }
+    const number = resolveTo(fields.to)
+    if (/[a-z]/i.test(number)) {
+      const msg = `I couldn’t match “${fields.to.trim()}” to one contact. Pick them from the list, or type the number.`
+      setError(msg)
+      if (handsFree) say(msg)
+      return
+    }
+    const body = { mode: fields.mode, to: number, goal: note, brief: note }
     useCallStore.setState({ handsFree })
     try {
       if (fields.mode === 'agent') {
