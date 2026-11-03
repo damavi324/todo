@@ -104,6 +104,7 @@ export const useCallStore = create((set, get) => ({
       // Warm up the phone line in the background so the first call (or a hand-off) is instant.
       setTimeout(() => { if (!device && !devicePromise) get().ensurePhone().catch(() => {}) }, 2000)
       get().loadHistory()
+      get().syncSession()
     }
     ws.onerror = () => { /* onclose follows and retries */ }
     ws.onmessage = (e) => {
@@ -331,6 +332,7 @@ export const useCallStore = create((set, get) => ({
       await cp(`/api/sessions/${session.id}/join`, {})
     } catch (err) {
       set({ joinPending: false })
+      if (await get().syncSession()) return // it had already ended: the screen moves on
       throw err
     }
   },
@@ -341,6 +343,41 @@ export const useCallStore = create((set, get) => ({
     if (call) call.disconnect()
     if (session) await cp(`/api/sessions/${session.id}/hangup`, {}).catch(() => {})
     get().endLocal()
+    if (session) await get().syncSession({ hungUp: true })
+  },
+
+  /**
+   * Checks the call on screen with the server, for when live updates were missed (the phone slept, the connection
+   * dropped). An ended call moves on to its notes or details. Returns true when the call turned out to be over.
+   */
+  async syncSession({ hungUp = false } = {}) {
+    const { session, view } = get()
+    if (!session || view !== 'active') return false
+    let call
+    try {
+      ;({ call } = await cp(`/api/sessions/${session.id}`))
+    } catch (err) {
+      // The server already forgot it (it keeps finished calls about 10 minutes): use the phone's copy, or start over.
+      if (err.status !== 404 && !hungUp) return false
+      call = archivedCall(session.id)
+      if (!call) {
+        get().newCall()
+        get().notify('That call already ended.')
+        return true
+      }
+    }
+    if (get().session?.id !== session.id) return false
+    const over = !!call.endedAt || call.status === 'ended' || BAD.has(call.status)
+    if (!over) {
+      if (call.status && call.status !== get().status) set({ status: call.status })
+      return false
+    }
+    get().endLocal()
+    archiveCall(call)
+    if (call.summary) set({ status: call.status, summary: call.summary, lines: call.transcript || get().lines, view: 'summary' })
+    else set({ status: call.status, detail: call, view: 'detail' })
+    get().refreshHistorySoon()
+    return true
   },
 
   toggleMute() {
@@ -446,6 +483,12 @@ export const useCallStore = create((set, get) => ({
     set({ logsOpen: false })
   },
 }))
+
+// While a call is on screen, check it now and then, in case live updates were missed; and when the app returns.
+setInterval(() => { if (useCallStore.getState().view === 'active') useCallStore.getState().syncSession() }, 15000)
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') useCallStore.getState().syncSession() })
+}
 
 // Tapping "Hang up" on the call notification.
 CallSession.addListener?.('hangup', () => useCallStore.getState().hangup())

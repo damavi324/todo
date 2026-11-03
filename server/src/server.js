@@ -392,6 +392,7 @@ async function route(req, res) {
     if (!s) return send(res, 404, { error: 'Call not found' });
     const body = await readBody(req);
     try {
+      if (m[2] === 'join' && s._finalized) return send(res, 409, { error: 'This call has already ended.' });
       if (m[2] === 'join') {
         log(`[call] joining you into ${s.callSid}`);
         await joinAgentCall(s);

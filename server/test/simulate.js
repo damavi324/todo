@@ -442,6 +442,9 @@ try {
 
   await req(`/twilio/status?sessionId=${ag.id}`, { method: 'POST', form: { CallSid: 'CA_AGENT_1', CallStatus: 'completed' } });
   await waitFor(() => ui.events.find((e) => e.type === 'summary' && e.sessionId === ag.id), 'agent summary', 6000);
+  r = await req(`/api/sessions/${ag.id}/join`, { method: 'POST', body: {} });
+  assert.equal(r.status, 409, 'an ended call cannot be joined');
+  assert.equal(r.json.error, 'This call has already ended.');
   pass('Agent call ends with a summary');
   tw.close();
 
