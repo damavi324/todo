@@ -250,6 +250,20 @@ export default function Settings({ onClose }) {
               />
             </label>
             <label className="block">
+              <span className="block text-sm text-ink">Assistant’s name</span>
+              <span className="block text-xs text-ink-3 mt-0.5 mb-2">
+                What your assistant calls itself on calls: “This is {(settings.assistantName || '').trim() || 'Pilot'}, an AI assistant for {(settings.userName || '').trim() || 'you'}.”
+              </span>
+              <input
+                value={settings.assistantName ?? ''}
+                onChange={(e) => updateSettings({ assistantName: e.target.value })}
+                placeholder="Pilot"
+                maxLength={40}
+                autoCapitalize="words"
+                className={`${fieldClass} w-full`}
+              />
+            </label>
+            <label className="block">
               <span className="block text-sm text-ink">About you</span>
               <span className="block text-xs text-ink-3 mt-0.5 mb-2">
                 Facts the assistant may share on any call. Anything for one call goes in that call.

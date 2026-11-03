@@ -478,7 +478,7 @@ try {
   const namedPlanReq = claudeRequests.find((c) => /call planner/.test(c.json.system));
   assert.match(namedPlanReq.json.system, /call planner for Sam Rivera's personal assistant/);
   assert.doesNotMatch(namedPlanReq.json.system, /\bMk\b/);
-  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550166', goal: 'Dinner Friday', brief: 'Tue is best', plan: { ...plan, kind: 'personal', reach: 'Matt', regarding: 'dinner on Friday' }, owner: 'Sam Rivera' } });
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550166', goal: 'Dinner Friday', brief: 'Tue is best', plan: { ...plan, kind: 'personal', reach: 'Matt', regarding: 'dinner on Friday' }, owner: 'Sam Rivera', assistant: 'Jarvis<script>' } });
   const ag3 = r.json.session;
   const tw3 = new WebSocket(`ws://localhost:${PORTS.app}/streams/agent`);
   await new Promise((res) => tw3.on('open', res));
@@ -486,7 +486,8 @@ try {
   tw3.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_3', callSid: ag3.callSid, customParameters: { sessionId: ag3.id } } }));
   await waitFor(() => agentLog.settings, 'named agent settings');
   assert.ok(agentLog.settings.agent.think.prompt.includes('first line: "Hi, is this Matt? I\'m calling on behalf of Sam Rivera."'), 'personal call: their name, then who it is for');
-  assert.ok(agentLog.settings.agent.think.prompt.includes('"This is Pilot, an AI assistant for Sam Rivera. Just so you know, this call is being transcribed."'));
+  assert.ok(agentLog.settings.agent.think.prompt.includes('"This is Jarvisscript, an AI assistant for Sam Rivera. Just so you know, this call is being transcribed."'), 'the name you gave the assistant, cleaned');
+  assert.match(agentLog.settings.agent.think.prompt, /^You are Jarvisscript, an AI assistant placing a phone call on behalf of Sam Rivera/);
   assert.match(agentLog.settings.agent.think.prompt, /Check with Sam Rivera \(ask_owner\) before:/);
   assert.doesNotMatch(agentLog.settings.agent.think.prompt, /Check with Mk\b/);
   pass('Your profile name reaches the call plan, the greeting and the agent’s instructions');

@@ -84,7 +84,7 @@ export function handleListenStream(twilioWs) {
 function agentPrompt(s) {
   const owner = (s.ownerName || '').trim() || config.ownerName;
   return [
-    `You are ${config.assistantName}, an AI assistant placing a phone call on behalf of ${owner}. You are speaking on a live phone call.`,
+    `You are ${s.assistantName || config.assistantName}, an AI assistant placing a phone call on behalf of ${owner}. You are speaking on a live phone call.`,
     '',
     s.about ? `ABOUT ${owner.toUpperCase()} (true on every call; use these facts, and do not ask the other person for them):\n${s.about}\n` : '',
     `THIS CALL: ${s.goal || 'See context.'}`,
@@ -154,7 +154,7 @@ export function introOf(s) {
   const owner = s.ownerName || config.ownerName;
   const g = greetingOf(s);
   const parts = [];
-  if (!/\bAI\b/.test(g)) parts.push(`This is ${config.assistantName}, an AI assistant for ${owner}.`);
+  if (!/\bAI\b/.test(g)) parts.push(`This is ${s.assistantName || config.assistantName}, an AI assistant for ${owner}.`);
   if (!/transcrib/i.test(g)) parts.push('Just so you know, this call is being transcribed.');
   return parts.join(' ');
 }

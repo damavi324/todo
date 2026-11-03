@@ -27,6 +27,7 @@ const SHARED_SETTINGS = [
   'voiceRemindersEnabled',
   'userName',
   'callerAbout',
+  'assistantName',
   'useSkills',
   'callSkills',
   'callVoice',

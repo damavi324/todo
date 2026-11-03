@@ -85,3 +85,8 @@ export function configProblems() {
 
 export const publicUrl = (p) => `https://${config.publicHost}${p}`;
 export const publicWss = (p) => `wss://${config.publicHost}${p}`;
+
+/** The assistant's name the app sends (Settings → Profile), or the server's default. Letters, spaces, . ' - only. */
+export function assistantNameOf(name) {
+  return String(name || '').replace(/[^\p{L}\p{N} .'-]/gu, '').trim().slice(0, 40) || config.assistantName;
+}

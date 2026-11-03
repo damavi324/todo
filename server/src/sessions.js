@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import WebSocket from 'ws';
-import { config } from './config.js';
+import { config, assistantNameOf } from './config.js';
 import { complete, parseJson } from './claude.js';
 
 // ---------- Live UI hub ----------
@@ -103,7 +103,7 @@ export function slog(s, level, text) {
   persist(s);
 }
 
-export function createSession({ mode, to, goal, brief, plan, owner, about, localNow, skills = [], planUsage, voice = '' }) {
+export function createSession({ mode, to, goal, brief, plan, owner, about, localNow, skills = [], planUsage, voice = '', assistant = '' }) {
   const s = {
     id: crypto.randomUUID(),
     mode, // 'copilot' | 'agent'
@@ -117,6 +117,7 @@ export function createSession({ mode, to, goal, brief, plan, owner, about, local
     brief: (brief || '').trim(),
     plan: plan || null,
     skills,
+    assistantName: assistantNameOf(assistant), // what the assistant calls itself on this call
     voice, // the voice picked in the app for this call; empty = the server's default
     // What this call used: Claude tokens per model (call plan, live tips, notes) and how long it lasted.
     usage: { claude: cleanUsage(planUsage), seconds: 0 },

@@ -1,6 +1,6 @@
 // Natural-language front door for the phone app: one spoken sentence becomes
-// a task/reminder, a phone call for Pilot, or both.
-import { config } from './config.js';
+// a task/reminder, a phone call for the assistant, or both.
+import { config, assistantNameOf } from './config.js';
 import { complete, parseJson } from './claude.js';
 import { toE164 } from './twilio.js';
 
@@ -18,20 +18,20 @@ const SCHEMA = `{
     "to": "phone number digits exactly as spoken, or empty",
     "contact": "who to call (business or person name), or empty",
     "goal": "one sentence: what the call should achieve",
-    "details": "everything Pilot may need: names, account info, preferred times, limits, what not to agree to",
-    "mode": "agent (Pilot makes the call) | copilot (the user talks, AI coaches)",
+    "details": "everything the assistant may need: names, account info, preferred times, limits, what not to agree to",
+    "mode": "agent (the assistant makes the call) | copilot (the user talks, AI coaches)",
     "when": "now | later"
   },
   "say": "one short, friendly confirmation of what you understood",
   "question": "if kind is unclear: the single question to ask, else empty"
 }`;
 
-function systemPrompt(owner = config.ownerName) {
+function systemPrompt(owner = config.ownerName, assistant = config.assistantName) {
   return [
     `You are the voice front door of ${owner}'s personal assistant app. ${owner} just spoke one request (transcribed by speech-to-text, so expect small errors and filler words).`,
     'Decide what they want:',
     '- task: a reminder or to-do ("remind me", "I need to", "add", "don\'t let me forget").',
-    `- call: they want a phone call made now ("call", "phone", "ring", "have Pilot call", "find out from"). Default mode is agent (Pilot calls for ${owner}); use copilot only if they say they will talk themselves.`,
+    `- call: they want a phone call made now ("call", "phone", "ring", "have ${assistant} call", "find out from"). Default mode is agent (${assistant} calls for ${owner}); use copilot only if they say they will talk themselves.`,
     '- both: e.g. a call to make later becomes a task with call details, or a call now plus a separate reminder.',
     '- A call they want made LATER (with a day or time) is kind "both": a task to make the call at that time, plus call details with when = "later".',
     'Rules:',
@@ -46,7 +46,7 @@ function systemPrompt(owner = config.ownerName) {
 
 const s = (v, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
-export async function interpret({ text, now, timezone, weekday, lists, owner, about, contacts }, usage) {
+export async function interpret({ text, now, timezone, weekday, lists, owner, about, contacts, assistant }, usage) {
   const spoken = s(text, 6000);
   if (!spoken) throw new Error('Nothing was heard');
   const listText = Array.isArray(lists) && lists.length
@@ -62,7 +62,7 @@ export async function interpret({ text, now, timezone, weekday, lists, owner, ab
       : '',
     `They said: "${spoken}"`,
   ].join('\n');
-  const reply = await complete({ model: config.anthropic.fastModel, system: systemPrompt(s(owner, 80) || config.ownerName), prompt, maxTokens: 900, timeoutMs: 25000, usage });
+  const reply = await complete({ model: config.anthropic.fastModel, system: systemPrompt(s(owner, 80) || config.ownerName, assistantNameOf(assistant)), prompt, maxTokens: 900, timeoutMs: 25000, usage });
   return normalize(parseJson(reply), spoken, lists);
 }
 

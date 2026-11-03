@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Play, Square, Loader2, Check } from 'lucide-react'
 import { useTaskStore } from '../store/useTaskStore'
-import { cp, apiUrl, ownerName } from '../lib/callpilot'
+import { cp, apiUrl, ownerName, assistantName } from '../lib/callpilot'
 import { Note } from './ui'
 
 /**
@@ -27,7 +27,7 @@ export default function CallVoicePicker() {
   const play = (id) => {
     if (playing.id === id) return stop()
     audio.current?.pause()
-    const a = new Audio(apiUrl(`/api/voices/${id}/sample?owner=${encodeURIComponent(ownerName())}`))
+    const a = new Audio(apiUrl(`/api/voices/${id}/sample?owner=${encodeURIComponent(ownerName())}&assistant=${encodeURIComponent(assistantName())}`))
     audio.current = a
     setPlaying({ id, state: 'loading' })
     a.onplaying = () => setPlaying({ id, state: 'playing' })

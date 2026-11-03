@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
-import { config, configProblems, publicUrl, publicWss } from './config.js';
+import { config, assistantNameOf, configProblems, publicUrl, publicWss } from './config.js';
 import { voiceAccessToken, createCall, hangupCall, toE164, twiml, streamParams, xml } from './twilio.js';
 import {
   broadcast,
@@ -265,7 +265,8 @@ async function route(req, res) {
     const voice = voiceById(vm[1]);
     if (!voice) return send(res, 404, { error: 'Unknown voice' });
     const owner = String(url.searchParams.get('owner') || '').replace(/[^\p{L}\p{N} .'-]/gu, '').trim().slice(0, 60) || config.ownerName;
-    const line = `Hi, this is ${config.assistantName}, an AI assistant. I'm trying to reach the front desk regarding an appointment, on behalf of ${owner}. Do you have a minute?`;
+    const name = assistantNameOf(url.searchParams.get('assistant'));
+    const line = `Hi, I'm trying to reach the front desk about an appointment, on behalf of ${owner}. This is ${name}, an AI assistant for ${owner}. Do you have a minute?`;
     try {
       const audio = await voiceSample(voice, line);
       res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': audio.length, 'Cache-Control': 'private, max-age=86400', ...SECURITY_HEADERS });
@@ -333,7 +334,7 @@ async function route(req, res) {
     try {
       log(`[plan] writing call plan (${String(body.brief || '').length} chars of details)`);
       const usage = {};
-      const plan = await generatePlan({ to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, skills: body.skills, usage });
+      const plan = await generatePlan({ to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, skills: body.skills, assistant: body.assistant, usage });
       log(`[plan] ready: ${plan.objective}`);
       return send(res, 200, { plan, usage });
     } catch (err) {
@@ -354,7 +355,7 @@ async function route(req, res) {
     body.goal = String(body.goal || '').slice(0, 2000);
     body.brief = String(body.brief || '').slice(0, 40000);
     if (mode === 'agent' && !body.goal?.trim()) return send(res, 400, { error: 'Tell the agent what the call is for' });
-    const s = createSession({ mode, to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '' });
+    const s = createSession({ mode, to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', assistant: body.assistant });
     if (mode === 'agent') {
       logCallerId(s, to);
       try {

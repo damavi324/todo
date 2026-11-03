@@ -32,6 +32,8 @@ export const DEFAULT_SETTINGS = {
   // it may share on any call. Details for a single call stay on that call.
   userName: '',
   callerAbout: '',
+  // What the assistant calls itself on calls ("This is Jarvis, an AI assistant for …"); empty = the server's default.
+  assistantName: '',
   // Call skills: standing instructions the assistant follows when it plans and makes a call.
   // Turning useSkills off sends none (fewer tokens) and the call uses the standard opening.
   useSkills: true,

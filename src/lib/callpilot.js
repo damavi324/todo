@@ -149,7 +149,11 @@ export function socketUrl(path) {
   return `${base}${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
 }
 
-export const assistantName = () => useTaskStore.getState().settings.callpilotAssistant || 'Pilot'
+/** What the assistant calls itself: your choice in Settings → Profile, else the server's default. */
+export const assistantName = () => {
+  const s = useTaskStore.getState().settings
+  return (s.assistantName || '').trim() || s.callpilotAssistant || 'Pilot'
+}
 export const ownerName = () => {
   const s = useTaskStore.getState().settings
   return (s.userName || '').trim() || 'you'
@@ -160,6 +164,7 @@ export function callerContext() {
   const now = new Date()
   return {
     owner: (s.userName || '').trim(),
+    assistant: (s.assistantName || '').trim(),
     about: (s.callerAbout || '').trim(),
     voice: s.callVoice || '',
     skills: s.useSkills === false ? [] : (s.callSkills || []).filter((x) => x.on && x.text?.trim()).map((x) => x.text.trim()),

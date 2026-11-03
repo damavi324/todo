@@ -7,7 +7,7 @@ import { config } from './config.js';
 import { CANDIDATES, audition, wav, mulawToPcm16 } from './voiceSamples.js';
 
 const owner = config.ownerName;
-const LINE = `Hi, this is ${config.assistantName}, an AI assistant calling on behalf of ${owner}. Um, I'm hoping to move a cleaning appointment to a Monday morning. Do you have anything open?`;
+const LINE = `Hi, I'm trying to reach the front desk about a cleaning, on behalf of ${owner}. This is ${config.assistantName}, an AI assistant for ${owner}. Do you have anything open on a Monday morning?`;
 
 
 
