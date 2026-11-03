@@ -1,0 +1,17 @@
+# Cloud Build (the "callpilot" trigger on pushes to main): build the call server from server/Dockerfile and
+# deploy it to the existing Cloud Run service. --image keeps the service's settings and secrets as they are.
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/callpilot:$COMMIT_SHA', 'server']
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/callpilot:$COMMIT_SHA']
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args: ['run', 'deploy', 'callpilot', '--image', 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/callpilot:$COMMIT_SHA', '--region', 'us-central1', '--quiet']
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/callpilot:$COMMIT_SHA'
+options:
+  logging: CLOUD_LOGGING_ONLY
