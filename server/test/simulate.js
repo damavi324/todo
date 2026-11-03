@@ -385,12 +385,23 @@ try {
   assert.deepEqual(st.agent.think.functions.map((f) => f.name), ['ask_owner', 'press_digits', 'finish_call']);
   assert.ok(st.agent.think.functions.every((f) => f.defer_until_eot), 'tools wait for the end of their turn');
   assert.equal(st.agent.greeting, undefined, 'no greeting over their "Hello?"');
-  assert.match(st.agent.think.prompt, /your reply is exactly this, word for word: "Hi, this is Pilot, an AI assistant calling on behalf of Mk\. This call is being transcribed\."/);
+  assert.ok(st.agent.think.prompt.includes('You have already said your first line: "Hi, I\'m calling on behalf of Mk." Never say it again.'));
+  assert.ok(st.agent.think.prompt.includes('Your next turn, whatever they answer, starts with exactly this: "This is Pilot, an AI assistant for Mk. Just so you know, this call is being transcribed."'));
   assert.match(st.agent.think.prompt, /Reschedule cleaning to Tue morning/);
-  pass('Voice agent configured: Flux listen/speak with quick turn-taking, Claude brain, tools, AI disclosure as first line');
+  pass('Voice agent configured: Flux listen/speak with quick turn-taking, Claude brain, tools, your name first then the AI introduction');
 
+  // They say "Hello?" (loud frames), then pause: the server says the first line itself, then lets their audio through.
+  const loud = () => Buffer.alloc(160, 0x00).toString('base64');
+  for (let i = 0; i < 6; i++) tw.send(JSON.stringify({ event: 'media', media: { track: 'inbound', payload: loud() } }));
+  for (let i = 0; i < 30 && !agentLog.injected.length; i++) {
+    tw.send(JSON.stringify({ event: 'media', media: { track: 'inbound', payload: silence() } }));
+    await sleep(20);
+  }
+  assert.equal(agentLog.audioBytes, 0, 'their "Hello?" is not passed to the agent');
+  await waitFor(() => agentLog.injected.includes("Hi, I'm calling on behalf of Mk."), 'first line after their hello', 3000);
+  for (let i = 0; i < 8; i++) tw.send(JSON.stringify({ event: 'media', media: { track: 'inbound', payload: silence() } }));
   await waitFor(() => agentLog.audioBytes >= 800, 'caller audio to agent');
-  pass('Caller audio is relayed to the agent after SettingsApplied');
+  pass('They say hello: the server says the first line word for word, then the conversation goes to the agent');
 
   await waitFor(() => toTwilio.find((m) => m.event === 'media'), 'agent audio to twilio');
   const media = toTwilio.find((m) => m.event === 'media');
@@ -442,8 +453,8 @@ try {
   tw2.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_2', callSid: 'CA_AGENT_2', customParameters: { sessionId: ag2.id } } }));
   await waitFor(() => agentLog.settings?.agent?.think?.prompt?.includes('reschedule a cleaning'), 'plan settings');
   const st2 = agentLog.settings.agent;
-  const opener = "Hi, this is Pilot, an AI assistant calling on behalf of Mk. This call is being transcribed. I'm calling to reschedule a cleaning for Mk Khanal.";
-  assert.ok(st2.think.prompt.includes(`word for word: "${opener}"`));
+  const opener = "Hi, I'm calling on behalf of Mk.";
+  assert.ok(st2.think.prompt.includes(`You have already said your first line: "${opener}"`));
   await waitFor(() => agentLog.injected.includes(opener), 'opener after silence', 5000);
   pass('Nobody says hello: the agent opens the call itself after a short wait');
   assert.match(st2.think.prompt, /CALL PLAN \(a guide, not a script/);
@@ -467,14 +478,15 @@ try {
   const namedPlanReq = claudeRequests.find((c) => /call planner/.test(c.json.system));
   assert.match(namedPlanReq.json.system, /call planner for Sam Rivera's personal assistant/);
   assert.doesNotMatch(namedPlanReq.json.system, /\bMk\b/);
-  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550166', goal: 'Reschedule cleaning', brief: 'Tue is best', plan, owner: 'Sam Rivera' } });
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550166', goal: 'Dinner Friday', brief: 'Tue is best', plan: { ...plan, kind: 'personal', reach: 'Matt', regarding: 'dinner on Friday' }, owner: 'Sam Rivera' } });
   const ag3 = r.json.session;
   const tw3 = new WebSocket(`ws://localhost:${PORTS.app}/streams/agent`);
   await new Promise((res) => tw3.on('open', res));
   agentLog.settings = null;
   tw3.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_3', callSid: ag3.callSid, customParameters: { sessionId: ag3.id } } }));
   await waitFor(() => agentLog.settings, 'named agent settings');
-  assert.match(agentLog.settings.agent.think.prompt, /word for word: "[^"]*calling on behalf of Sam Rivera\./);
+  assert.ok(agentLog.settings.agent.think.prompt.includes('first line: "Hi, is this Matt? I\'m calling on behalf of Sam Rivera."'), 'personal call: their name, then who it is for');
+  assert.ok(agentLog.settings.agent.think.prompt.includes('"This is Pilot, an AI assistant for Sam Rivera. Just so you know, this call is being transcribed."'));
   assert.match(agentLog.settings.agent.think.prompt, /Check with Sam Rivera \(ask_owner\) before:/);
   assert.doesNotMatch(agentLog.settings.agent.think.prompt, /Check with Mk\b/);
   pass('Your profile name reaches the call plan, the greeting and the agent’s instructions');
@@ -493,12 +505,13 @@ try {
   agentLog.settings = null;
   tw4.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_4', callSid: ag4.callSid, customParameters: { sessionId: ag4.id } } }));
   await waitFor(() => agentLog.settings, 'skills agent settings');
-  assert.ok(agentLog.settings.agent.think.prompt.includes('word for word: "Hi, this is Pilot, an AI assistant. I am trying to reach John regarding dinner on Friday, on behalf of Mr. Manoj Khanal."'));
+  assert.ok(agentLog.settings.agent.think.prompt.includes('first line: "Hi, I am trying to reach John regarding dinner on Friday, on behalf of Mr. Manoj Khanal."'));
+  assert.ok(agentLog.settings.agent.think.prompt.includes('starts with exactly this: "This is Pilot, an AI assistant for Mr. Manoj Khanal. Just so you know, this call is being transcribed."'));
   assert.match(agentLog.settings.agent.think.prompt, /SKILLS \(follow these on every call\):\n- Open with/);
   assert.match(agentLog.settings.agent.think.prompt, /Just so you know, this call is being transcribed/);
   assert.equal(agentLog.settings.agent.speak.provider.model, 'flux-wes-en', 'the voice picked in the app is used on the call');
   tw4.close();
-  pass('Call skills: planner and agent follow them, the first line is short and always says it is an AI');
+  pass('Call skills: planner and agent follow them; your name comes first, the AI introduction right after');
 
   claudeRequests.length = 0;
   r = await req('/api/parse-task', { method: 'POST', body: { text: 'remind me to buy milk tomorrow', now: '2026-11-02T10:00', weekday: 'Monday', timezone: 'America/Chicago' } });

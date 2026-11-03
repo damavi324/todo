@@ -10,9 +10,19 @@ export const DEFAULT_LISTS = [
 ]
 
 export const DEFAULT_SKILLS = [
-  { id: 'opening', on: true, text: 'Open with one short line only: "Hi, this is <assistant name>, an AI assistant. I\'m trying to reach <the person or business> regarding <the reason, in a few words>, on behalf of <my name>." Nothing else in that first line, so people don\'t hang up.' },
-  { id: 'transcribed', on: true, text: 'Right after they answer, say "Just so you know, this call is being transcribed." Then go straight into the reason for the call.' },
+  { id: 'opening', on: true, text: 'Open with my name, not yours, in one short line: "Hi, is this <their first name>? I\'m calling on behalf of <my name>." for a person, or "Hi, I\'m trying to reach <the person or department> about <the reason, in a few words>, on behalf of <my name>." for a business. Nothing else in that first line, so they know a real person they know sent you.' },
+  { id: 'transcribed', on: true, text: 'Once they answer, say "This is <assistant name>, an AI assistant for <my name>. Just so you know, this call is being transcribed." Then go straight into the reason for the call.' },
 ]
+
+// The starting skills as first shipped. Skills still worded exactly like this are moved to the new wording;
+// anything you edited is left alone.
+const OLD_DEFAULT_SKILLS = {
+  opening: 'Open with one short line only: "Hi, this is <assistant name>, an AI assistant. I\'m trying to reach <the person or business> regarding <the reason, in a few words>, on behalf of <my name>." Nothing else in that first line, so people don\'t hang up.',
+  transcribed: 'Right after they answer, say "Just so you know, this call is being transcribed." Then go straight into the reason for the call.',
+}
+const updateSkills = (skills) => Array.isArray(skills)
+  ? skills.map((x) => (OLD_DEFAULT_SKILLS[x.id] && x.text === OLD_DEFAULT_SKILLS[x.id] ? { ...x, text: DEFAULT_SKILLS.find((d) => d.id === x.id).text } : x))
+  : skills
 
 export const DEFAULT_SETTINGS = {
   notificationStyle: 'sticky',
@@ -51,6 +61,7 @@ export const DEFAULT_SETTINGS = {
  */
 export function mergeProfile(settings) {
   const { callerName, ...rest } = settings
+  if ('callSkills' in rest) rest.callSkills = updateSkills(rest.callSkills)
   return callerName?.trim() ? { ...rest, userName: callerName.trim() } : rest
 }
 

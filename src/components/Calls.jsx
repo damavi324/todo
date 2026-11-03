@@ -140,6 +140,15 @@ const MODES = [
   { value: 'copilot', label: 'I’ll talk', icon: <UserRound size={14} /> },
 ]
 
+/** The first line the assistant says, as the server words it (server/src/streams.js greetingOf). */
+function openingLine(p) {
+  if (p.greeting) return p.greeting
+  const why = p.regarding ? ` about ${p.regarding.replace(/^(about|regarding)\s+/i, '')}` : ''
+  if (p.reach && p.kind === 'personal') return `Hi, is this ${p.reach}? I’m calling on behalf of ${ownerName()}.`
+  if (p.reach) return `Hi, I’m trying to reach ${p.reach}${why}, on behalf of ${ownerName()}.`
+  return `Hi, I’m calling on behalf of ${ownerName()}${why}.`
+}
+
 /** The form starts from the draft it was opened with (a redial, a task's call); the screen remounts it per draft. */
 function Compose() {
   const { makePlan, startCall, notify, phoneState } = useCallStore()
@@ -334,9 +343,8 @@ function PlanView() {
       <h2 className="text-lg font-semibold text-ink mt-1 leading-snug">{p.objective || 'Call plan'}</h2>
       <div className="mt-4 rounded-lg bg-surface-2 px-4 py-3">
         <p className="text-xs font-medium text-ink-3">{assistantName()} opens with</p>
-        <p className="text-sm text-ink mt-1 leading-relaxed">“{p.greeting
-          ? (/\bAI\b/.test(p.greeting) ? p.greeting : `Hi, this is ${assistantName()}, an AI assistant. ${p.greeting.replace(/^(hi|hello)[,!.]?\s*/i, '')}`)
-          : `Hi, this is ${assistantName()}, an AI assistant calling on behalf of ${ownerName()}. This call is being transcribed. ${p.opening || ''}`.trim()}”</p>
+        <p className="text-sm text-ink mt-1 leading-relaxed">“{openingLine(p)}”</p>
+        <p className="text-xs text-ink-3 mt-1.5">Then: “This is {assistantName()}, an AI assistant for {ownerName()}. Just so you know, this call is being transcribed.”</p>
       </div>
       {p.missing_info?.length > 0 && (
         <Note tone="warn" className="mt-4">

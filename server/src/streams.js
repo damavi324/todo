@@ -14,6 +14,18 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const OWNER_ANSWER_MS = Number(process.env.OWNER_ANSWER_MS) || 90000;
 // People answer with "Hello?" before the caller talks. If nobody speaks this long after pickup, the agent opens anyway.
 const HELLO_WAIT_MS = Number(process.env.AGENT_HELLO_WAIT_MS) || 2000;
+// Their "Hello?" counts as over after this much quiet, or after this long however much they say (a voicemail greeting).
+const HELLO_QUIET_MS = 450;
+const HELLO_MAX_MS = 5000;
+
+// Rough loudness of a 20 ms mu-law frame from the caller (0 = silence), for spotting their "Hello?".
+const MULAW = Array.from({ length: 256 }, (_, b) => {
+  const u = ~b & 0xff;
+  const x = ((((u & 0x0f) << 3) + 0x84) << ((u >> 4) & 7)) - 0x84;
+  return Math.abs(x);
+});
+const loudness = (buf) => { let sum = 0; for (const b of buf) sum += MULAW[b]; return buf.length ? sum / buf.length : 0; };
+const SPEECH_LEVEL = Number(process.env.AGENT_SPEECH_LEVEL) || 900;
 
 // =====================================================================
 // Copilot stream: Twilio <Start><Stream track="both_tracks"> -> two live
@@ -80,9 +92,13 @@ function agentPrompt(s) {
     s.skills?.length ? `${owner.toUpperCase()}'S SKILLS (follow these on every call):\n${s.skills.map((x) => `- ${x}`).join('\n')}\n` : '',
     `THIS CALL, IN ${owner.toUpperCase()}'S WORDS (reference only; the plan above takes priority): ${(s.brief || s.goal || '(none)').slice(0, s.plan ? 5000 : 9000)}`,
     '',
-    'YOUR FIRST LINE',
-    `- The call has just been answered. When they first speak (usually "Hello?"), your reply is exactly this, word for word: "${greetingOf(s)}"`,
-    '- If you already said that line, do not say it again; carry on from where the conversation is. If it is a voicemail greeting, follow the voicemail rule below instead.',
+    'HOW THE CALL OPENS',
+    `- You have already said your first line: "${greetingOf(s)}" Never say it again.`,
+    introOf(s)
+      ? `- Your next turn, whatever they answer, starts with exactly this: "${introOf(s)}" Then go straight into why you are calling. If they said it is the wrong person or number, still say it, then ask for the right person or apologize and end the call.`
+      : '- They already know who you are and that the call is transcribed: go straight into why you are calling.',
+    s.plan?.opening ? `- When you get to why you are calling, say it along these lines: "${s.plan.opening}"` : '',
+    '- If what you hear is a voicemail greeting, follow the voicemail rule below instead.',
     '',
     'HOW TO TALK (you are on the phone; sound like a relaxed, friendly person, not a script)',
     '- Keep each turn SHORT: usually one sentence, at most two, under about 20 words. Ask one thing at a time, then stop and let them answer.',
@@ -96,8 +112,7 @@ function agentPrompt(s) {
     '- Do not over-apologize or over-explain. One "sorry about that" is plenty.',
     '- No lists, no markdown, no emojis, no stage directions.',
     '- This is a live conversation. Respond to what they actually said; the plan is guidance, not lines to recite. If they offer something new, use judgment within your limits.',
-    `- Your first line says you are an AI assistant calling for ${owner}. If asked again whether you are an AI, say yes, plainly. Never claim to be human.`,
-    greetingOf(s).includes('transcribed') ? '' : '- Your first line does not mention transcription. In your next turn, say "Just so you know, this call is being transcribed." and then go straight into why you are calling.',
+    `- You tell them early that you are an AI assistant calling for ${owner}. If asked again whether you are an AI, say yes, plainly. Never claim to be human.`,
     '',
     'WHO YOU ARE CALLING',
     `- If the goal or details name a specific person ${owner} already knows, this is a personal call. Do not ask "what's your name?" You already know who they are. If a different person answers, ask to speak to the person you called.`,
@@ -120,14 +135,28 @@ function agentPrompt(s) {
 }
 
 /**
- * The agent's first line. With skills, the plan writes a short one (who it is trying to reach, why, for whom);
- * it always says it is an AI assistant. Without skills, the standard introduction.
+ * The first line, said by the server itself once they answer. It leads with who the call is for, so the person
+ * hears a name they know before anything else: "Hi, is this Matt? I'm calling on behalf of Manoj." The skills can
+ * word it their own way (the plan's greeting). The AI introduction always follows in the next turn (see introOf).
  */
 export function greetingOf(s) {
   const owner = s.ownerName || config.ownerName;
-  const g = s.plan?.greeting;
-  if (g) return /\bAI\b/.test(g) ? g : `Hi, this is ${config.assistantName}, an AI assistant. ${g.replace(/^(hi|hello)[,!.]?\s*/i, '')}`;
-  return `Hi, this is ${config.assistantName}, an AI assistant calling on behalf of ${owner}. This call is being transcribed. ${s.plan?.opening || ''}`.trim();
+  if (s.plan?.greeting) return s.plan.greeting;
+  const reach = s.plan?.reach;
+  const why = s.plan?.regarding ? ` about ${s.plan.regarding.replace(/^(about|regarding)\s+/i, '')}` : '';
+  if (reach && s.plan?.kind === 'personal') return `Hi, is this ${reach}? I'm calling on behalf of ${owner}.`;
+  if (reach) return `Hi, I'm trying to reach ${reach}${why}, on behalf of ${owner}.`;
+  return `Hi, I'm calling on behalf of ${owner}${why}.`;
+}
+
+/** Said right after they answer the first line, unless that line already said it. */
+export function introOf(s) {
+  const owner = s.ownerName || config.ownerName;
+  const g = greetingOf(s);
+  const parts = [];
+  if (!/\bAI\b/.test(g)) parts.push(`This is ${config.assistantName}, an AI assistant for ${owner}.`);
+  if (!/transcrib/i.test(g)) parts.push('Just so you know, this call is being transcribed.');
+  return parts.join(' ');
 }
 
 function agentSettings(s) {
@@ -195,7 +224,10 @@ export function handleAgentStream(twilioWs) {
   let hangupRequested = false;
   let keepAlive = null;
   let helloTimer = null;
-  let theySpoke = false;
+  // Until the first line is said, their audio is held back from the agent, so it can't answer their "Hello?"
+  // itself and skip the line. hello: { start, speechFrames, lastSpeech } while listening for it.
+  let opened = false;
+  const hello = { start: 0, speechFrames: 0, lastSpeech: 0 };
 
   const sendTwilio = (obj) => {
     if (twilioWs.readyState === WebSocket.OPEN) twilioWs.send(JSON.stringify(obj));
@@ -203,6 +235,25 @@ export function handleAgentStream(twilioWs) {
   const sendAgent = (obj) => {
     if (agentWs?.readyState === WebSocket.OPEN) agentWs.send(typeof obj === 'string' || Buffer.isBuffer(obj) ? obj : JSON.stringify(obj));
   };
+  // Say the first line exactly as written, then let their audio through to the agent.
+  const openCall = (why) => {
+    if (opened) return;
+    opened = true;
+    clearTimeout(helloTimer);
+    log('[agent] first line (' + why + ')');
+    sendAgent({ type: 'InjectAgentMessage', message: greetingOf(session) });
+  };
+  const listenForHello = (buf) => {
+    const now = Date.now();
+    if (loudness(buf) > SPEECH_LEVEL) {
+      hello.speechFrames++;
+      hello.lastSpeech = now;
+    }
+    const spoke = hello.speechFrames >= 3; // ~60 ms of voice, not a click
+    if (spoke && now - hello.lastSpeech >= HELLO_QUIET_MS) openCall('after their hello');
+    else if (spoke && now - hello.start >= HELLO_MAX_MS) openCall('they kept talking');
+  };
+
   const playToCaller = (buf) => {
     for (const f of frames(buf)) sendTwilio({ event: 'media', streamSid, media: { payload: f.toString('base64') } });
   };
@@ -280,20 +331,17 @@ export function handleAgentStream(twilioWs) {
         case 'SettingsApplied':
           log('[agent] settings accepted; agent is live');
           ready = true;
-          for (const chunk of pendingAudio.splice(0)) sendAgent(chunk);
           setStatus(session, 'live');
           emit(session, 'agent_state', { state: 'talking' });
-          // Nobody said hello: open the call ourselves.
-          helloTimer = setTimeout(() => {
-            if (!theySpoke) sendAgent({ type: 'InjectAgentMessage', message: greetingOf(session) });
-          }, HELLO_WAIT_MS);
+          pendingAudio.length = 0; // pickup noise and the start of their "Hello?" stay with us
+          hello.start = Date.now();
+          // Nobody says hello: open the call ourselves.
+          helloTimer = setTimeout(() => { if (!hello.speechFrames) openCall('nobody spoke'); }, HELLO_WAIT_MS);
           break;
         case 'ConversationText':
           addLine(session, msg.role === 'assistant' ? 'agent' : 'them', msg.content);
           break;
         case 'UserStartedSpeaking':
-          theySpoke = true;
-          clearTimeout(helloTimer);
           sendTwilio({ event: 'clear', streamSid }); // barge-in: drop queued agent audio
           break;
         case 'AgentThinking':
@@ -350,8 +398,9 @@ export function handleAgentStream(twilioWs) {
       connectAgent();
     } else if (msg.event === 'media' && session) {
       const buf = Buffer.from(msg.media.payload, 'base64');
-      if (ready) sendAgent(buf);
-      else if (pendingAudio.length < 250) pendingAudio.push(buf);
+      if (!ready) { if (pendingAudio.length < 250) pendingAudio.push(buf); }
+      else if (opened) sendAgent(buf);
+      else listenForHello(buf);
     } else if (msg.event === 'mark' && msg.mark?.name === 'hangup' && hangupRequested) {
       setTimeout(() => doHangup('goodbye played'), 400);
     } else if (msg.event === 'stop') {
