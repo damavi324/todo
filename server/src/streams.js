@@ -5,7 +5,7 @@ import { lines, languagePrompt } from './language.js';
 import { hangupCall, updateCall, twiml, streamParams, xml } from './twilio.js';
 import { dtmfMulaw, frames } from './dtmf.js';
 import { planToPrompt } from './planner.js';
-import { voiceById, defaultVoiceId } from './voiceSamples.js';
+import { voiceById, defaultVoiceId, speedOf } from './voiceSamples.js';
 import {
   getSession, setStatus, addLine, emit, utteranceAssembler, askOwner, finalize, markVoicemail,
 } from './sessions.js';
@@ -242,7 +242,7 @@ function agentSettings(s) {
         ],
       },
       // No greeting: the first line is spoken after they say hello (see the prompt and the hello timer).
-      speak: nepali ? elevenLabsSpeak() : speakConfig(voiceById(s.voice || defaultVoiceId())?.o),
+      speak: nepali ? elevenLabsSpeak() : speakConfig({ ...voiceById(s.voice || defaultVoiceId())?.o, agentSpeed: speedOf(s.speed) }),
     },
   };
 }

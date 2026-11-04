@@ -47,7 +47,8 @@ export async function speakOut(text) {
     const res = await fetch(`${url}/api/speak`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ text: line }),
+      // The voice and speed picked for calls, so voice mode sounds the same.
+      body: JSON.stringify({ text: line, voice: useTaskStore.getState().settings.callVoice || '', speed: useTaskStore.getState().settings.voiceSpeed || 'normal' }),
       signal: AbortSignal.timeout(15000),
     })
     if (!res.ok) throw new Error(`speak ${res.status}`)

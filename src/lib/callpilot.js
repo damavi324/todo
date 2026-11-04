@@ -167,6 +167,8 @@ export function callerContext() {
     assistant: (s.assistantName || '').trim(),
     about: (s.callerAbout || '').trim(),
     voice: s.callVoice || '',
+    // How fast it talks (Settings → Calling → Voice): slower | normal | faster, on calls and in voice mode.
+    speed: s.voiceSpeed || 'normal',
     // Which of the server's numbers the call shows as coming from (Settings → Calling); empty = the server's default.
     from: s.callFrom || '',
     // The call form sends its own choice; this is the default from Settings.

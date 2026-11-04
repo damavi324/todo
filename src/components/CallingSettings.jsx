@@ -1,10 +1,9 @@
 import { useState } from 'react'
-import { Loader2, CheckCircle2, LogOut, History, X, Play } from 'lucide-react'
+import { Loader2, CheckCircle2, LogOut, History, X } from 'lucide-react'
 import { useTaskStore } from '../store/useTaskStore'
 import { useCallStore } from '../store/useCallStore'
-import { connectCallPilot, disconnectCallPilot, normalizeServerUrl, assistantName } from '../lib/callpilot'
-import { speakOut } from '../lib/voiceChat'
-import { Button, ErrorNote, IconButton, Section, Switch, fieldClass } from './ui'
+import { connectCallPilot, disconnectCallPilot, normalizeServerUrl } from '../lib/callpilot'
+import { Button, ErrorNote, IconButton, Section, fieldClass } from './ui'
 import CallVoicePicker from './CallVoicePicker'
 import CallerIdPicker from './CallerIdPicker'
 
@@ -29,7 +28,6 @@ function writeRecent(list) {
  */
 export default function CallingSettings({ onOpenProfile }) {
   const settings = useTaskStore((s) => s.settings)
-  const updateSettings = useTaskStore((s) => s.updateSettings)
   // Not connected (say, after signing in on a new device): start from the server used last.
   const [url, setUrl] = useState(() => settings.callpilotUrl || readRecent()[0] || '')
   const [passcode, setPasscode] = useState('')
@@ -74,22 +72,9 @@ export default function CallingSettings({ onOpenProfile }) {
   return (
     <>
       {settings.callpilotConnected && (
-        <Section title="On your calls">
+        <CallVoicePicker>
           <CallerIdPicker />
-          <CallVoicePicker />
-          <div className="flex items-center justify-between gap-3 px-4 py-3 min-h-[56px]">
-            <div className="min-w-0">
-              <p className="text-sm text-ink">Talk back in voice mode</p>
-              <p className="text-xs text-ink-3 mt-0.5">When you ask by voice, {assistantName()} speaks in a natural voice and you can answer out loud. About 2¢ for a short back-and-forth. Off: voice mode stays quiet.</p>
-            </div>
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {settings.voiceTalkBack !== false && (
-                <IconButton label="Hear the voice" onClick={() => speakOut(`Hi, it’s ${assistantName()}. Who should I call?`)}><Play size={16} /></IconButton>
-              )}
-              <Switch label="Talk back in voice mode" checked={settings.voiceTalkBack !== false} onChange={(on) => updateSettings({ voiceTalkBack: on })} />
-            </div>
-          </div>
-        </Section>
+        </CallVoicePicker>
       )}
       <Section title="Calling server">
         {!editing && settings.callpilotConnected ? (

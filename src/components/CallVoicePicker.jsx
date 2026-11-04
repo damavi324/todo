@@ -2,11 +2,19 @@ import { useEffect, useRef, useState } from 'react'
 import { Play, Square, Loader2, Check } from 'lucide-react'
 import { useTaskStore } from '../store/useTaskStore'
 import { cp, apiUrl, ownerName, assistantName } from '../lib/callpilot'
-import { ErrorNote, Segmented } from './ui'
+import { speakOut } from '../lib/voiceChat'
+import { ErrorNote, IconButton, Section, Segmented, Switch } from './ui'
 
 const SERVICES = [
   { value: 'elevenlabs', label: 'ElevenLabs' },
   { value: 'deepgram', label: 'Deepgram' },
+]
+
+// How fast the assistant talks, on calls and in voice mode. Normal is the voice as it always sounded.
+const SPEEDS = [
+  { value: 'slower', label: 'Slower' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'faster', label: 'Faster' },
 ]
 
 const THINKING = [
@@ -15,11 +23,12 @@ const THINKING = [
 ]
 
 /**
- * Settings → Calling: how the assistant thinks on calls, and the voice it uses: hear each one and pick it.
+ * Settings → Calling: how the assistant thinks on calls (with `children`, such as the caller ID, on top), and one
+ * Voice section for everything it says out loud, on calls and in voice mode: the voice, its speed, talking back.
  * Samples are recorded by the calling server at phone quality (like a real call), so the first play takes a few seconds.
  * ElevenLabs voices (the most natural) come from your ElevenLabs library once the server has an ElevenLabs key.
  */
-export default function CallVoicePicker() {
+export default function CallVoicePicker({ children }) {
   const settings = useTaskStore((s) => s.settings)
   const updateSettings = useTaskStore((s) => s.updateSettings)
   const [list, setList] = useState(null)
@@ -42,7 +51,7 @@ export default function CallVoicePicker() {
   const play = (id) => {
     if (playing.id === id) return stop()
     audio.current?.pause()
-    const a = new Audio(apiUrl(`/api/voices/${id}/sample?owner=${encodeURIComponent(ownerName())}&assistant=${encodeURIComponent(assistantName())}`))
+    const a = new Audio(apiUrl(`/api/voices/${id}/sample?owner=${encodeURIComponent(ownerName())}&assistant=${encodeURIComponent(assistantName())}&speed=${speed}`))
     audio.current = a
     setPlaying({ id, state: 'loading' })
     a.onplaying = () => setPlaying({ id, state: 'playing' })
@@ -54,6 +63,7 @@ export default function CallVoicePicker() {
     a.play().catch(() => {})
   }
   const thinking = settings.callThinking || 'smart'
+  const speed = settings.voiceSpeed || 'normal'
   // Older servers don't say which voices are ElevenLabs': all of them are Deepgram's.
   const byService = {
     elevenlabs: list?.voices.filter((v) => v.provider === 'elevenlabs') || [],
@@ -75,10 +85,39 @@ export default function CallVoicePicker() {
     updateSettings({ callVoice: (voices.find((v) => v.id === list.default) || voices[0]).id })
   }
 
-  if (error && !list) return <div className="p-4"><ErrorNote tone="warn">{error}</ErrorNote></div>
-  if (!list) return <p className="p-4 text-xs text-ink-3 flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" />Loading voices…</p>
+  const talkBack = (
+    <div className="flex items-center justify-between gap-3 px-4 py-3 min-h-[56px]">
+      <div className="min-w-0">
+        <p className="text-sm text-ink">Talk back in voice mode</p>
+        <p className="text-xs text-ink-3 mt-0.5">When you ask by voice, {assistantName()} speaks in this voice and you can answer out loud. About 2¢ for a short back-and-forth. Off: voice mode stays quiet.</p>
+      </div>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {settings.voiceTalkBack !== false && (
+          <IconButton label="Hear voice mode" onClick={() => speakOut(`Hi, it’s ${assistantName()}. Who should I call?`)}><Play size={16} /></IconButton>
+        )}
+        <Switch label="Talk back in voice mode" checked={settings.voiceTalkBack !== false} onChange={(on) => updateSettings({ voiceTalkBack: on })} />
+      </div>
+    </div>
+  )
+
+  if (!list) {
+    return (
+      <>
+        <Section title="On your calls">{children}</Section>
+        <Section title="Voice">
+          {error
+            ? <div className="p-4"><ErrorNote tone="warn">{error}</ErrorNote></div>
+            : <p className="p-4 text-xs text-ink-3 flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" />Loading voices…</p>}
+          {talkBack}
+        </Section>
+      </>
+    )
+  }
   return (
-    <div className="p-4">
+    <>
+    <Section title="On your calls">
+    {children}
+    {(nepali || list.thinking) && <div className="p-4">
       {nepali && (
         <div className="mb-4">
           <p className="text-sm text-ink">Language on calls</p>
@@ -103,6 +142,11 @@ export default function CallVoicePicker() {
           )}
         </div>
       )}
+    </div>}
+    </Section>
+    <Section title="Voice">
+    <div className="p-4">
+      <p className="text-xs text-ink-3 mb-4">One voice for everything {assistantName()} says: on your calls, and when it talks to you in voice mode.</p>
       {list.elevenlabs && (
         <div className="mb-4">
           <p className="text-sm text-ink">Voice service</p>
@@ -116,12 +160,24 @@ export default function CallVoicePicker() {
           {serviceNote && <ErrorNote tone="warn" className="mt-2">{serviceNote}</ErrorNote>}
         </div>
       )}
-      <p className="text-sm text-ink">Assistant’s voice on calls</p>
+      <p className="text-sm text-ink">Assistant’s voice</p>
       <p className="text-xs text-ink-3 mt-0.5 mb-2">Play a sample, then pick one. It sounds like a phone line, because that’s how the other person hears it.</p>
       {error && <ErrorNote tone="warn" className="mb-2">{error}</ErrorNote>}
       <VoiceList voices={list.elevenlabs ? byService[service] : list.voices} chosen={chosen} defaultId={list.default} playing={playing} play={play}
         choose={(id) => updateSettings({ callVoice: id })} />
+      <div className="mt-4">
+        <p className="text-sm text-ink">Speaking speed</p>
+        <p className="text-xs text-ink-3 mt-0.5 mb-2">
+          {service === 'elevenlabs'
+            ? 'ElevenLabs voices always talk at their normal speed on calls. Voice mode uses a Deepgram voice at this speed.'
+            : 'Normal is how it sounds today. Applies from your next call, and right away in voice mode.'}
+        </p>
+        <Segmented value={speed} onChange={(v) => updateSettings({ voiceSpeed: v })} options={SPEEDS} />
+      </div>
     </div>
+    {talkBack}
+    </Section>
+    </>
   )
 }
 

@@ -63,9 +63,8 @@ export const config = {
     agentThinkEndpoint: (clean(e.AGENT_THINK_ENDPOINT) || '').toLowerCase(),
     // Nepali calls: Flux has no Nepali, so the agent listens with Nova-3's Nepali model.
     nepaliListenModel: clean(e.AGENT_LISTEN_MODEL_NE) || 'nova-3',
-    // The app's own voice in voice mode (Aura-2, billed per character), instead of the phone's robotic one.
-    speakUrl: clean(e.DEEPGRAM_SPEAK_URL) || 'https://api.deepgram.com/v1/speak',
-    appVoice: clean(e.APP_VOICE) || 'aura-2-thalia-en',
+    // Text to speech for voice mode (Flux on /v2/speak, Aura on /v1/speak), in the voice picked for calls.
+    speakBase: (clean(e.DEEPGRAM_SPEAK_BASE) || 'https://api.deepgram.com').replace(/\/+$/, ''),
   },
   // ElevenLabs speaks Nepali calls (Deepgram has no Nepali voice), and English calls when an ElevenLabs voice is
   // picked. Your key; Deepgram's rate drops to "BYO TTS".

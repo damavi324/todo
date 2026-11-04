@@ -1,17 +1,32 @@
 // Voice mode, out loud: a natural Deepgram voice for what the app says, and a short spoken back-and-forth with
 // Claude when something needs you (a request it didn't understand, a question from a live call, a call that
-// couldn't start). Cheap on purpose: Haiku for the words, Aura-2 for the voice, the app's own dictation to listen.
+// couldn't start). Cheap on purpose: Haiku for the words, a Deepgram voice (the one picked for calls), the app's own dictation to listen.
 import { config, assistantNameOf } from './config.js';
 import { complete, parseJson } from './claude.js';
+import { voiceById, defaultVoiceId, speedOf } from './voiceSamples.js';
 
 const s = (v, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
-/** `text` spoken in the app's voice, as MP3. */
-export async function speak(text) {
+/**
+ * The Deepgram voice voice mode speaks in: the one picked for calls, so the app sounds the same everywhere.
+ * A non-Deepgram pick (ElevenLabs) uses the default Flux voice instead.
+ */
+export function appVoice(id) {
+  const v = voiceById(id) || voiceById(defaultVoiceId());
+  const model = v?.o?.agentVoice;
+  return v?.provider !== 'elevenlabs' && /^(flux|aura)-/.test(model || '') ? model : 'flux-miles-en';
+}
+
+/** `text` spoken as MP3 in the picked voice and speed (slower | normal | faster). */
+export async function speak(text, { voice, speed } = {}) {
   const line = s(text, 1500);
   if (!line) throw new Error('Nothing to say');
   if (!config.deepgram.apiKey) throw new Error('DEEPGRAM_API_KEY is not set');
-  const url = `${config.deepgram.speakUrl}?model=${encodeURIComponent(config.deepgram.appVoice)}&encoding=mp3`;
+  const model = appVoice(voice);
+  // Flux voices are on /v2/speak, Aura on /v1/speak; both take a speed.
+  const path = model.startsWith('flux') ? '/v2/speak' : '/v1/speak';
+  const rate = Math.min(1.5, Math.max(model.startsWith('flux') ? 0.5 : 0.7, speedOf(speed)));
+  const url = `${config.deepgram.speakBase}${path}?model=${encodeURIComponent(model)}&encoding=mp3&speed=${rate}`;
   const r = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Token ${config.deepgram.apiKey}`, 'Content-Type': 'application/json' },

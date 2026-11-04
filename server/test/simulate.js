@@ -51,7 +51,7 @@ http.createServer((req, res) => {
       return res.end(JSON.stringify({ tier: 'free', character_count: 2500, character_limit: 10000, next_character_count_reset_unix: 1796000000 }));
     }
     // Deepgram's speak endpoint (the app's voice in voice mode) shares this mock server.
-    if (req.url.startsWith('/v1/speak?')) {
+    if (/^\/v[12]\/speak\?/.test(req.url)) {
       res.writeHead(req.headers.authorization === 'Token dg_test' ? 200 : 401, { 'Content-Type': 'audio/mpeg' });
       return res.end(Buffer.alloc(3000, 0x55));
     }
@@ -210,7 +210,7 @@ const env = {
   ELEVENLABS_API_KEY: 'xi_test',
   ELEVENLABS_VOICE_ID_NE: 'voice_ne',
   ELEVENLABS_API_BASE: `http://localhost:${PORTS.eleven}`,
-  DEEPGRAM_SPEAK_URL: `http://localhost:${PORTS.eleven}/v1/speak`,
+  DEEPGRAM_SPEAK_BASE: `http://localhost:${PORTS.eleven}`,
 };
 const app = spawn(process.execPath, ['src/server.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let appOut = '';
@@ -578,7 +578,7 @@ try {
   r = await req('/api/plan', { method: 'POST', body: { to: '2145550199', goal: 'Dinner Friday', brief: 'Calling: John', owner: 'Mr. Manoj Khanal', skills } });
   assert.match(claudeRequests.at(-1).json.system, /MR\. MANOJ KHANAL'S SKILLS[^]*- Open with: Hi, I am trying to reach/);
   const skillPlan = { ...plan, greeting: 'Hi, I am trying to reach John regarding dinner on Friday, on behalf of Mr. Manoj Khanal.' };
-  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550144', goal: 'Dinner Friday', plan: skillPlan, owner: 'Mr. Manoj Khanal', skills, voice: 'flux-wes-en', planUsage: { 'claude-sonnet-5-5': { in: 1000, out: 200, calls: 1 }, 'bad model!': { in: 5 } } } });
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550144', goal: 'Dinner Friday', plan: skillPlan, owner: 'Mr. Manoj Khanal', skills, voice: 'flux-wes-en', speed: 'faster', planUsage: { 'claude-sonnet-5-5': { in: 1000, out: 200, calls: 1 }, 'bad model!': { in: 5 } } } });
   const ag4 = r.json.session;
   assert.deepEqual(ag4.usage.claude, { 'claude-sonnet-5-5': { in: 1000, out: 200, calls: 1 } }, 'plan tokens are kept with the call; junk dropped');
   const tw4 = new WebSocket(`ws://localhost:${PORTS.app}/streams/agent`);
@@ -591,6 +591,7 @@ try {
   assert.match(agentLog.settings.agent.think.prompt, /SKILLS \(follow these on every call\):\n- Open with/);
   assert.match(agentLog.settings.agent.think.prompt, /Just so you know, this call is being transcribed/);
   assert.equal(agentLog.settings.agent.speak.provider.model, 'flux-wes-en', 'the voice picked in the app is used on the call');
+  assert.equal(agentLog.settings.agent.speak.provider.speed, 1.1, 'the speed picked in the app is used on the call');
   tw4.close();
   pass('Call skills: planner and agent follow them; your name comes first, the AI introduction right after');
 
@@ -664,7 +665,7 @@ try {
   r = await req('/api/voices/el-EXAVITQu4vr4xnSDxMaL/sample?owner=Mk');
   assert.equal(r.status, 200, 'an ElevenLabs voice can be previewed');
   assert.match(JSON.parse(elevenCalls.at(-1).body).text, /on behalf of Mk/);
-  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550185', goal: 'Book a table', voice: 'el-EXAVITQu4vr4xnSDxMaL', thinking: 'fast' } });
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550185', goal: 'Book a table', voice: 'el-EXAVITQu4vr4xnSDxMaL', thinking: 'fast', speed: 'slower' } });
   const agEl = r.json.session;
   assert.equal(agEl.voice, 'el-EXAVITQu4vr4xnSDxMaL');
   const twEl = new WebSocket(`ws://localhost:${PORTS.app}/streams/agent`);
@@ -678,6 +679,7 @@ try {
   assert.deepEqual(el.speak[0].provider, { type: 'eleven_labs', model_id: 'eleven_v4_turbo', language_code: 'en' });
   assert.equal(el.speak[0].endpoint.url, 'wss://api.elevenlabs.io/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL/multi-stream-input');
   assert.equal(el.speak.at(-1).provider.model, 'flux-miles-en', 'a Deepgram voice takes over if ElevenLabs fails');
+  assert.equal(el.speak[0].provider.speed, undefined, 'ElevenLabs voices ignore the speed setting instead of failing');
   assert.deepEqual(el.think.provider, { type: 'anthropic', model: 'claude-haiku-4-5' }, 'faster thinking: Haiku');
   assert.equal(el.think.endpoint, undefined, 'Haiku runs on Deepgram, no Anthropic key sent');
   twEl.close();
@@ -825,13 +827,21 @@ try {
 
   // ---- voice mode talking back ----
   const authed = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-  const sp = await fetch(base + '/api/speak', { method: 'POST', headers: authed, body: JSON.stringify({ text: 'Calling Ram in 8 seconds.' }) });
+  let sp = await fetch(base + '/api/speak', { method: 'POST', headers: authed, body: JSON.stringify({ text: 'Calling Ram in 8 seconds.' }) });
   assert.equal(sp.status, 200);
   assert.equal(sp.headers.get('content-type'), 'audio/mpeg');
   assert.equal((await sp.arrayBuffer()).byteLength, 3000);
-  const speakCall = elevenCalls.find((c) => c.url.startsWith('/v1/speak?'));
-  assert.match(speakCall.url, /model=aura-2-thalia-en&encoding=mp3/);
-  assert.equal(JSON.parse(speakCall.body).text, 'Calling Ram in 8 seconds.');
+  const speakCalls = () => elevenCalls.filter((c) => /^\/v[12]\/speak\?/.test(c.url));
+  assert.equal(speakCalls().at(-1).url, '/v2/speak?model=flux-miles-en&encoding=mp3&speed=1', 'no voice picked: the default Flux voice at normal speed');
+  assert.equal(JSON.parse(speakCalls().at(-1).body).text, 'Calling Ram in 8 seconds.');
+  // The voice and speed picked for calls are the ones voice mode talks in.
+  await fetch(base + '/api/speak', { method: 'POST', headers: authed, body: JSON.stringify({ text: 'Hi', voice: 'flux-wes-en', speed: 'slower' }) });
+  assert.equal(speakCalls().at(-1).url, '/v2/speak?model=flux-wes-en&encoding=mp3&speed=0.9');
+  await fetch(base + '/api/speak', { method: 'POST', headers: authed, body: JSON.stringify({ text: 'Hi', voice: 'aura-2-thalia-en', speed: 'faster' }) });
+  assert.equal(speakCalls().at(-1).url, '/v1/speak?model=aura-2-thalia-en&encoding=mp3&speed=1.1', 'Aura voices use /v1/speak');
+  sp = await fetch(base + '/api/speak', { method: 'POST', headers: authed, body: JSON.stringify({ text: 'Hi', voice: 'el-EXAVITQu4vr4xnSDxMaL', speed: 'weird' }) });
+  assert.equal(sp.status, 200, 'an ElevenLabs pick or an unknown speed does not fail');
+  assert.equal(speakCalls().at(-1).url, '/v2/speak?model=flux-miles-en&encoding=mp3&speed=1');
   assert.equal((await fetch(base + '/api/speak', { method: 'POST', headers: authed, body: '{}' })).status, 502);
   assert.equal((await fetch(base + '/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"text":"hi"}' })).status, 401);
   let tk = await (await fetch(base + '/api/talk', { method: 'POST', headers: authed, body: JSON.stringify({ topic: 'question', context: { question: 'Does Tuesday at 9 work?', with: 'Bright Smiles Dental', goal: 'move the cleaning' }, turns: [{ role: 'assistant', text: 'Pilot asks: does Tuesday at 9 work?' }, { role: 'user', text: 'yeah that works' }], owner: 'Mk', assistant: 'Pilot' }) })).json();

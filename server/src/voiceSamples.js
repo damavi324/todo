@@ -15,6 +15,19 @@ export const CANDIDATES = [
   { file: '9-cartesia-sonic-2', label: 'Cartesia Sonic 2 (managed by Deepgram)', env: 'AGENT_TTS=cartesia  CARTESIA_MODEL=sonic-2', o: { agentTts: 'cartesia', cartesiaModel: 'sonic-2' }, only: true },
 ];
 
+/**
+ * How fast the assistant talks, picked once in the app for calls and voice mode alike. Normal is the voice as it
+ * always was (AGENT_SPEED, else 1); slower and faster are a gentle step either side, inside what Deepgram's
+ * Flux (0.5-1.5) and Aura-2 (0.7-1.5) voices accept.
+ */
+export const SPEED_NAMES = ['slower', 'normal', 'faster'];
+export function speedOf(name) {
+  if (name === 'slower') return 0.9;
+  if (name === 'faster') return 1.1;
+  const n = Number(config.deepgram.agentSpeed);
+  return config.deepgram.agentSpeed && Number.isFinite(n) ? n : 1;
+}
+
 /** Voices the app can offer: id, label and the settings that select it. */
 export const VOICES = CANDIDATES.filter((c) => !c.only).map((c) => ({ id: c.o.agentVoice, label: c.label.replace(/ \((current|previous) default\)$/, ''), o: c.o }));
 
@@ -142,11 +155,11 @@ export function audition(c, line) {
 
 
 const samples = new Map();
-/** A playable WAV of `voice` saying `line`, cached so each one is recorded once. */
-export async function voiceSample(voice, line) {
-  const key = `${voice.id}|${line}`;
+/** A playable WAV of `voice` saying `line` (at `speed` for Deepgram voices), cached so each one is recorded once. */
+export async function voiceSample(voice, line, speed = 'normal') {
+  const key = `${voice.id}|${speed}|${line}`;
   if (!samples.has(key)) {
-    const recorded = voice.provider === 'elevenlabs' ? elevenSample(voice.o.elevenVoice, line) : audition({ o: voice.o }, line);
+    const recorded = voice.provider === 'elevenlabs' ? elevenSample(voice.o.elevenVoice, line) : audition({ o: { ...voice.o, agentSpeed: speedOf(speed) } }, line);
     const p = recorded.then(({ audio, error }) => {
       if (error || audio.length < 1600) throw new Error(error || 'No audio came back');
       return wav(mulawToPcm16(audio));

@@ -14,7 +14,7 @@ import {
 import { handleListenStream, handleAgentStream, joinAgentCall } from './streams.js';
 import { generatePlan, normalizePlan, cleanSkills } from './planner.js';
 import { accountUsage } from './usage.js';
-import { VOICES, voiceById, voiceSample, elevenLabsVoices, defaultVoiceId } from './voiceSamples.js';
+import { VOICES, voiceById, voiceSample, elevenLabsVoices, defaultVoiceId, SPEED_NAMES } from './voiceSamples.js';
 import { interpret, parseTask } from './assistant.js';
 import { speak, talk } from './talk.js';
 import { LANGUAGES, cleanLanguage, languageProblem } from './language.js';
@@ -278,7 +278,7 @@ async function route(req, res) {
     const name = assistantNameOf(url.searchParams.get('assistant'));
     const line = `Hi, I'm trying to reach the front desk about an appointment, on behalf of ${owner}. This is ${name}, an AI assistant for ${owner}. Do you have a minute?`;
     try {
-      const audio = await voiceSample(voice, line);
+      const audio = await voiceSample(voice, line, SPEED_NAMES.includes(url.searchParams.get('speed')) ? url.searchParams.get('speed') : 'normal');
       res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': audio.length, 'Cache-Control': 'private, max-age=86400', ...SECURITY_HEADERS });
       return res.end(audio);
     } catch (err) {
@@ -331,7 +331,7 @@ async function route(req, res) {
   if (p === '/api/speak' && method === 'POST') {
     const body = await readBody(req);
     try {
-      const { audio, chars } = await speak(body.text);
+      const { audio, chars } = await speak(body.text, { voice: body.voice, speed: body.speed });
       res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': audio.length, 'Cache-Control': 'no-store', 'X-Characters': String(chars), ...SECURITY_HEADERS });
       return res.end(audio);
     } catch (err) {
@@ -402,7 +402,7 @@ async function route(req, res) {
     // Only the AI agent speaks a language; a call you make yourself is always transcribed in English.
     const language = mode === 'agent' ? cleanLanguage(body.language) : 'en';
     if (languageProblem(language)) return send(res, 400, { error: languageProblem(language) });
-    const s = createSession({ mode, to, from, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', assistant: body.assistant, language, thinking: body.thinking });
+    const s = createSession({ mode, to, from, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', speed: body.speed, assistant: body.assistant, language, thinking: body.thinking });
     if (mode === 'agent') {
       logCallerId(s, to);
       try {

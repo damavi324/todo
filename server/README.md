@@ -99,7 +99,7 @@ Browser (Twilio Voice SDK)                Twilio                     This server
 | Deepgram live transcription (copilot, two sides) | ~$0.01–0.02/min |
 | Deepgram voice agent incl. Claude Haiku | ~$0.08/min |
 | Claude suggestions + summary | a few cents per call |
-| Voice mode talking back (Aura-2 voice + Haiku) | ~$0.003 per spoken line, ~2¢ for a short back-and-forth |
+| Voice mode talking back (Deepgram voice + Haiku) | ~$0.003 per spoken line, ~2¢ for a short back-and-forth |
 
 
 ## Run it in the cloud (no PC needed)
