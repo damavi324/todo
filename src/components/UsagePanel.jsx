@@ -43,7 +43,7 @@ export default function UsagePanel({ onClose }) {
           {accounts?.error && (
             <p className="text-xs text-warn mb-2">Couldn’t get balances from the calling server ({accounts.error}). If it says “Not found”, the server needs the latest update.</p>
           )}
-            <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-2 gap-2">
               <Balance name="Twilio" hint="Phone line: per minute, plus the number" data={accounts?.error ? { error: 'Not available' } : accounts?.twilio} loading={loading && !accounts}
                 extra={accounts?.twilio?.spentThisMonth != null && `${money(accounts.twilio.spentThisMonth, accounts.twilio.currency)} spent this month`}
                 link="https://console.twilio.com/us1/billing/manage-billing/billing-overview" />
@@ -67,6 +67,8 @@ export default function UsagePanel({ onClose }) {
                 )}
                 <a href="https://platform.claude.com/settings/billing" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-accent mt-1">Credit balance<ExternalLink size={11} /></a>
               </div>
+              {/* Older servers don't report ElevenLabs. */}
+              {(accounts?.elevenlabs || (loading && !accounts)) && <ElevenLabsCredits data={accounts?.elevenlabs} loading={loading && !accounts} />}
             </div>
         </section>
 
@@ -100,7 +102,7 @@ export default function UsagePanel({ onClose }) {
             </table>
           </div>
           <p className="text-xs text-ink-3 mt-2 leading-relaxed">
-            Claude costs are estimates at list price. While the assistant is on a call, its thinking runs inside Deepgram and is billed there, not here.
+            Claude costs are estimates at list price. While the assistant is on a call, its thinking is billed outside this count: by Deepgram with “Faster”, or straight to your Anthropic account with “Smarter”.
             Calls made before this update have no usage recorded.
           </p>
         </section>
@@ -132,6 +134,31 @@ function Balance({ name, hint, data, loading, extra, link }) {
       <p className="text-lg font-semibold text-ink mt-1 tabular-nums">{loading ? '…' : data?.error ? '—' : money(data?.balance, data?.currency)}</p>
       <p className="text-xs text-ink-3">{data?.error ? data.error : extra || 'balance left'}</p>
       <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-accent mt-1">Billing<ExternalLink size={11} /></a>
+    </div>
+  )
+}
+
+/** ElevenLabs credits: about one per character the assistant says in an ElevenLabs voice, refilled monthly. */
+function ElevenLabsCredits({ data, loading }) {
+  const ok = data && !data.error && data.creditsLimit > 0
+  const left = ok ? data.creditsLeft / data.creditsLimit : 0
+  const resets = ok && data.resetsAt ? new Date(data.resetsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''
+  return (
+    <div className="rounded-xl bg-surface-2 px-4 py-3">
+      <p className="text-sm font-medium text-ink">ElevenLabs{ok && data.plan && <span className="text-xs font-normal text-ink-3"> · {data.plan} plan</span>}</p>
+      <p className="text-xs text-ink-3">Natural voices on calls, per character spoken</p>
+      <p className="text-lg font-semibold text-ink mt-1 tabular-nums">{loading ? '…' : ok ? data.creditsLeft.toLocaleString() : '—'}</p>
+      {ok ? (
+        <>
+          <p className="text-xs text-ink-3">credits left of {data.creditsLimit.toLocaleString()} (≈ {Math.round(data.creditsLeft / 450)} min of calls){resets && `, refills ${resets}`}</p>
+          <div className="mt-1.5 h-1.5 rounded-full bg-line overflow-hidden" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(left * 100)} aria-label="ElevenLabs credits left">
+            <div className={`h-full rounded-full ${left < 0.15 ? 'bg-warn' : 'bg-accent'}`} style={{ width: `${Math.round(left * 100)}%` }} />
+          </div>
+        </>
+      ) : (
+        <p className="text-xs text-ink-3">{data?.error || ''}</p>
+      )}
+      <a href="https://elevenlabs.io/app/subscription" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-accent mt-1">Subscription<ExternalLink size={11} /></a>
     </div>
   )
 }

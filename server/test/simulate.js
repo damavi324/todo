@@ -46,6 +46,10 @@ http.createServer((req, res) => {
         { voice_id: 'bad id!', name: 'Broken' },
       ] }));
     }
+    if (req.url === '/v1/user/subscription') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ tier: 'free', character_count: 2500, character_limit: 10000, next_character_count_reset_unix: 1796000000 }));
+    }
     if (req.url.startsWith('/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL?output_format=ulaw_8000')) {
       res.writeHead(200, { 'Content-Type': 'audio/basic' });
       return res.end(Buffer.alloc(4000, 0x7f));
@@ -654,6 +658,7 @@ try {
   assert.equal(r.status, 200);
   assert.ok('twilio' in r.json && 'deepgram' in r.json && r.json.models.smart === 'claude-sonnet-5-5');
   assert.deepEqual(r.json.anthropic, { spentThisMonth: 13.345, currency: 'USD' }, 'Anthropic cost report: cents summed into dollars');
+  assert.deepEqual(r.json.elevenlabs, { plan: 'free', creditsUsed: 2500, creditsLimit: 10000, creditsLeft: 7500, resetsAt: new Date(1796000000 * 1000).toISOString() }, 'ElevenLabs credits left this month');
   pass('Usage page: provider balances come back (or each provider\'s error)');
 
   // Twilio says a machine answered: the agent is told, the transcript says so, and the notes say voicemail.
