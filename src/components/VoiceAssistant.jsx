@@ -11,6 +11,7 @@ import { useCallStore } from '../store/useCallStore'
 import SpeechCapture from '../plugins/SpeechCapture'
 import { useBack } from '../lib/backStack'
 import { mergeContacts, phoneContacts, loadPhoneContacts, pickByName, likelyContacts } from '../lib/phoneContacts'
+import { canTalk, converse, cancelConversation, sentence, useVoiceChat } from '../lib/voiceChat'
 
 
 function localNow() {
@@ -43,7 +44,7 @@ function wantsACallNow(text) {
  * Claude (on the calling server) decides whether it is a task, a call for Pilot, or both; a call you said out loud
  * goes straight to dialing. Falls back to on-device speech + the built-in parser when the server is not set up.
  */
-export default function VoiceAssistant({ onClose, onTask: handTask, onCall: handCall }) {
+export default function VoiceAssistant({ initialText = '', onClose, onTask: handTask, onCall: handCall }) {
   const lists = useTaskStore((s) => s.lists)
   const [phase, setPhase] = useState('compose') // compose | thinking | result | error
   const [text, setText] = useState('')
@@ -103,12 +104,29 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall: hand
       }
       setResult(r)
       setPhase('result')
+      // Said out loud and not understood: ask out loud, and let them answer the same way.
+      if (spoken && r.kind === 'unclear' && canTalk()) {
+        const question = r.question || 'Sorry, I didn’t quite get that. What would you like me to do?'
+        const end = await converse({ topic: 'unclear', opening: question, context: { heard, question } })
+        if (closed.current) return
+        if (end.outcome === 'request') return interpret(end.text, { spoken: true })
+        if (end.outcome === 'stop') cancel()
+      }
     } catch (e) {
       setWaking(false)
       // A call that couldn't be placed must not quietly become a to-do.
       if (wantsACallNow(heard)) {
-        setError(e.message || 'The calling server didn’t answer. Try the call again in a moment.')
+        const problem = e.message || 'The calling server didn’t answer. Try the call again in a moment.'
+        setError(problem)
         setPhase('error')
+        // Already talking it through out loud: say what went wrong and what they'd like to do.
+        if (spoken && useVoiceChat.getState().live && canTalk()) {
+          const end = await converse({ topic: 'problem', opening: `That didn’t work. ${sentence(problem)} Want me to try again?`, context: { problem, goal: heard } })
+          if (closed.current) return
+          if (end.outcome === 'retry') return interpret(heard, { spoken: true })
+          if (end.outcome === 'request') return interpret(end.text, { spoken: true })
+          if (end.outcome === 'stop') cancel()
+        }
         return
       }
       // Server hiccup on a reminder: still save the words as a task with the local parser.
@@ -167,8 +185,8 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall: hand
   }
 
   useEffect(() => {
-    // Start listening once the panel is on screen.
-    const frame = requestAnimationFrame(() => begin())
+    // Start listening once the panel is on screen, or act on a request already said in a conversation.
+    const frame = requestAnimationFrame(() => (initialText ? interpret(initialText, { spoken: true }) : begin()))
     return () => { cancelAnimationFrame(frame); rec.current?.cancel(); SpeechCapture.stop?.().catch(() => {}) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -194,6 +212,7 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall: hand
 
   const cancel = () => {
     closed.current = true
+    cancelConversation()
     rec.current?.cancel()
     SpeechCapture.stop?.().catch(() => {})
     onClose()

@@ -50,6 +50,11 @@ http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ tier: 'free', character_count: 2500, character_limit: 10000, next_character_count_reset_unix: 1796000000 }));
     }
+    // Deepgram's speak endpoint (the app's voice in voice mode) shares this mock server.
+    if (req.url.startsWith('/v1/speak?')) {
+      res.writeHead(req.headers.authorization === 'Token dg_test' ? 200 : 401, { 'Content-Type': 'audio/mpeg' });
+      return res.end(Buffer.alloc(3000, 0x55));
+    }
     if (req.url.startsWith('/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL?output_format=ulaw_8000')) {
       res.writeHead(200, { 'Content-Type': 'audio/basic' });
       return res.end(Buffer.alloc(4000, 0x7f));
@@ -73,7 +78,12 @@ const claudeServer = http.createServer((req, res) => {
     const isPlan = /call planner/.test(json.system);
     const isAssistant = /voice front door/.test(json.system);
     const isTask = /Turn one spoken reminder into a to-do task/.test(json.system);
-    const text = isTask
+    const isTalk = /talking with them out loud/.test(json.system);
+    const text = isTalk
+      ? (/asked them:/.test(json.system)
+        ? '{"reply":"Okay, I’ll tell Pilot Tuesday works.","outcome":"answer","text":"Yes, Tuesday at 9 works"}'
+        : '{"reply":"Got it, calling Ram about dinner.","outcome":"request","text":""}')
+      : isTask
       ? '{"title":"Buy milk","notes":"","dueDate":"2026-11-03","dueTime":"25:00","priority":"urgent"}'
       : isAssistant
       ? '{"kind":"both","task":{"title":"Call the dentist","notes":"","dueDate":"2026-10-30","dueTime":"09:00","priority":"medium","listId":"personal"},"call":{"to":"(214) 555-0100","contact":"Bright Smiles Dental","goal":"Move the cleaning to a weekday morning","details":"Patient: Manoj Khanal","mode":"agent","when":"later"},"say":"Reminder Friday 9am to have Pilot call the dentist.","question":""}'
@@ -200,6 +210,7 @@ const env = {
   ELEVENLABS_API_KEY: 'xi_test',
   ELEVENLABS_VOICE_ID_NE: 'voice_ne',
   ELEVENLABS_API_BASE: `http://localhost:${PORTS.eleven}`,
+  DEEPGRAM_SPEAK_URL: `http://localhost:${PORTS.eleven}/v1/speak`,
 };
 const app = spawn(process.execPath, ['src/server.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let appOut = '';
@@ -811,6 +822,30 @@ try {
   assert.match(aReq.json.system, /starts with "call", "phone", "ring" or "dial".*is a call made NOW/, "a bare \"Call X\" is a call, not a task");
   assert.match(aReq.json.system, /Never turn a call request into a task just because the name is unclear/);
   pass('Voice assistant: one sentence becomes a task with date/time/list plus a call for Pilot');
+
+  // ---- voice mode talking back ----
+  const authed = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const sp = await fetch(base + '/api/speak', { method: 'POST', headers: authed, body: JSON.stringify({ text: 'Calling Ram in 8 seconds.' }) });
+  assert.equal(sp.status, 200);
+  assert.equal(sp.headers.get('content-type'), 'audio/mpeg');
+  assert.equal((await sp.arrayBuffer()).byteLength, 3000);
+  const speakCall = elevenCalls.find((c) => c.url.startsWith('/v1/speak?'));
+  assert.match(speakCall.url, /model=aura-2-thalia-en&encoding=mp3/);
+  assert.equal(JSON.parse(speakCall.body).text, 'Calling Ram in 8 seconds.');
+  assert.equal((await fetch(base + '/api/speak', { method: 'POST', headers: authed, body: '{}' })).status, 502);
+  assert.equal((await fetch(base + '/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"text":"hi"}' })).status, 401);
+  let tk = await (await fetch(base + '/api/talk', { method: 'POST', headers: authed, body: JSON.stringify({ topic: 'question', context: { question: 'Does Tuesday at 9 work?', with: 'Bright Smiles Dental', goal: 'move the cleaning' }, turns: [{ role: 'assistant', text: 'Pilot asks: does Tuesday at 9 work?' }, { role: 'user', text: 'yeah that works' }], owner: 'Mk', assistant: 'Pilot' }) })).json();
+  assert.deepEqual(tk.result, { reply: 'Okay, I’ll tell Pilot Tuesday works.', outcome: 'answer', text: 'Yes, Tuesday at 9 works' });
+  const tReq = claudeRequests.find((c) => /talking with them out loud/.test(c.json.system));
+  assert.equal(tReq.json.model, 'claude-haiku-5-5');
+  assert.match(tReq.json.system, /Bright Smiles Dental.*Does Tuesday at 9 work\?/);
+  assert.match(tReq.json.messages[0].content, /Pilot: Pilot asks: does Tuesday at 9 work\?\nMk: yeah that works/);
+  // A new request with nothing in it can't be acted on, so the conversation carries on instead.
+  tk = await (await fetch(base + '/api/talk', { method: 'POST', headers: authed, body: JSON.stringify({ topic: 'unclear', context: { heard: 'call ram', question: 'What should I ask Ram?' }, turns: [{ role: 'assistant', text: 'What should I ask Ram?' }, { role: 'user', text: 'dinner' }] }) })).json();
+  assert.equal(tk.result.outcome, 'continue');
+  assert.equal((await fetch(base + '/api/talk', { method: 'POST', headers: authed, body: JSON.stringify({ topic: 'nope', turns: [{ role: 'user', text: 'hi' }] }) })).status, 502);
+  assert.equal((await fetch(base + '/api/talk', { method: 'POST', headers: authed, body: JSON.stringify({ topic: 'unclear', turns: [{ role: 'assistant', text: 'What?' }] }) })).status, 502);
+  pass('Voice mode talks back: Aura-2 voice from Deepgram, and a short spoken back-and-forth with Haiku that ends in an answer or a request');
 
   const appUpdate = twilioCalls.find((c) => c.url === '/2010-04-01/Accounts/AC_TEST/Applications/AP_TEST.json' && c.params.get('VoiceUrl'));
   assert.equal(appUpdate?.params.get('VoiceUrl'), 'https://localhost:5591/twilio/outgoing');

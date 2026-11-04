@@ -16,6 +16,7 @@ import { generatePlan, normalizePlan, cleanSkills } from './planner.js';
 import { accountUsage } from './usage.js';
 import { VOICES, voiceById, voiceSample, elevenLabsVoices, defaultVoiceId } from './voiceSamples.js';
 import { interpret, parseTask } from './assistant.js';
+import { speak, talk } from './talk.js';
 import { LANGUAGES, cleanLanguage, languageProblem } from './language.js';
 import { ensureTwimlApp, validTwilioSignature } from './twilio.js';
 import { openLiveTranscriber, thinkUsesOwnKey } from './deepgram.js';
@@ -324,6 +325,31 @@ async function route(req, res) {
     } catch (err) {
       console.error('[assistant] failed:', err.message);
       return send(res, 502, { error: `Could not understand that: ${err.message}` });
+    }
+  }
+
+  if (p === '/api/speak' && method === 'POST') {
+    const body = await readBody(req);
+    try {
+      const { audio, chars } = await speak(body.text);
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': audio.length, 'Cache-Control': 'no-store', 'X-Characters': String(chars), ...SECURITY_HEADERS });
+      return res.end(audio);
+    } catch (err) {
+      console.warn('[speak] failed:', err.message);
+      return send(res, 502, { error: `Could not speak that: ${err.message}` });
+    }
+  }
+
+  if (p === '/api/talk' && method === 'POST') {
+    const body = await readBody(req);
+    try {
+      const usage = {};
+      const result = await talk(body, usage);
+      log(`[talk] ${body.topic}: ${result.outcome}${result.text ? ` | ${result.text.slice(0, 120)}` : ''}`);
+      return send(res, 200, { result, usage });
+    } catch (err) {
+      console.error('[talk] failed:', err.message);
+      return send(res, 502, { error: `Could not answer that: ${err.message}` });
     }
   }
 

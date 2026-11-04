@@ -12,6 +12,7 @@ import { useTaskStore } from '../store/useTaskStore'
 import { formatNumber, assistantName, ownerName, isCallPilotReady, samePhone } from '../lib/callpilot'
 import { startDictation, listenUntilPause } from '../lib/dictation'
 import { say } from '../lib/notifications'
+import { canTalk, converse, askAssistant, sentence, useVoiceChat } from '../lib/voiceChat'
 import { loadPhoneContacts, phoneContacts, mergeContacts, pickByName, searchContacts, likelyContacts } from '../lib/phoneContacts'
 import { formatDue } from '../lib/dates'
 import { addAppointment, addFollowUp, callWith, contactFor, scheduleCallback, callbackTime } from '../lib/callFollowUps'
@@ -125,8 +126,24 @@ function Countdown({ label, seconds = HANDS_FREE_SECONDS, onDone, onCancel }) {
     </div>
   )
 }
-// A problem with a call asked for by voice: shown as a pop-up to read and dismiss, never read out loud.
-const showError = (message) => useCallStore.setState({ errorDialog: String(message || 'Something went wrong.') })
+/**
+ * A problem with a call asked for by voice: shown as a pop-up to read and dismiss. Only when you're already in a
+ * spoken conversation is it said out loud and talked through (try again, call someone else, or leave it).
+ */
+async function showError(message, { retry, call } = {}) {
+  const text = String(message || 'Something went wrong.')
+  if (useVoiceChat.getState().live && canTalk()) {
+    const end = await converse({
+      topic: 'problem',
+      opening: `The call couldn’t go ahead. ${sentence(text)}${retry ? ' Want me to try again?' : ' What would you like to do?'}`,
+      context: { problem: text, goal: call?.goal, with: call?.to ? callWith(call) : '' },
+    })
+    if (end.outcome === 'stop') return
+    if (end.outcome === 'retry' && retry) return retry()
+    if (end.outcome === 'request') return askAssistant(end.text)
+  }
+  useCallStore.setState({ errorDialog: text })
+}
 
 function ErrorDialog() {
   const message = useCallStore((s) => s.errorDialog)
@@ -324,14 +341,14 @@ function Compose() {
     if (/[a-z]/i.test(number)) {
       const msg = `I couldn’t match “${fields.to.trim()}” to one contact. Pick them from the list, or type the number.`
       setError(msg)
-      if (handsFree) showError(msg)
+      if (handsFree) showError(msg, { call: { goal: note } })
       return
     }
     const from = useTaskStore.getState().settings.callFromNumber
     if (samePhone(from, number)) {
       const msg = 'That number is the one this call would show as coming from, so it would go straight to voicemail. Pick the other number under Call from, or call a different phone.'
       setError(msg)
-      if (handsFree) showError(msg)
+      if (handsFree) showError(msg, { call: { to: number, goal: note } })
       return
     }
     const body = { mode: fields.mode, to: number, goal: note, brief: note, language: fields.mode === 'agent' ? fields.language || language : 'en' }
@@ -351,7 +368,7 @@ function Compose() {
     } catch (err) {
       setError(err.message)
       // Asked for by voice: a pop-up to read and dismiss, never read out loud.
-      if (handsFree) showError(err.message)
+      if (handsFree) showError(err.message, { call: { to: number, goal: note }, retry: () => go(fields, { handsFree: true }) })
       else notify(err.message, 'error')
     } finally {
       setBusy('')
@@ -477,7 +494,7 @@ function PlanView() {
     setAuto(false)
     setBusy(true)
     try { await startCall(pending) } catch (err) {
-      if (useCallStore.getState().handsFree) showError(`The call didn’t start. ${err.message}`)
+      if (useCallStore.getState().handsFree) showError(`The call didn’t start. ${err.message}`, { call: pending, retry: call })
       else notify(err.message, 'error')
     } finally { setBusy(false) }
   }

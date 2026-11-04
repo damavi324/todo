@@ -5,8 +5,9 @@ import { cp, socketUrl, isCallPilotReady, assistantName, wakeServer, callerConte
 import { useTaskStore } from '../store/useTaskStore'
 import { archiveCall, archivedCall, mergeHistory, hasFinal, archivedList } from '../lib/callArchive'
 import CallSession from '../plugins/CallSession'
-import { contactFor } from '../lib/callFollowUps'
+import { contactFor, callWith } from '../lib/callFollowUps'
 import { say } from '../lib/notifications'
+import { canTalk, converse, cancelConversation, endTalk, useVoiceChat } from '../lib/voiceChat'
 
 const BAD = new Set(['failed', 'busy', 'no-answer', 'canceled'])
 const LIVE_TEXT = { starting: 'Starting', dialing: 'Dialing', queued: 'Dialing', initiated: 'Dialing', ringing: 'Ringing', live: 'Live', ended: 'Call ended', busy: 'Line busy', 'no-answer': 'No answer', failed: 'Call failed', canceled: 'Canceled' }
@@ -194,19 +195,22 @@ export const useCallStore = create((set, get) => ({
       case 'question':
         set({ question: ev.question })
         CallSession.alert({ title: `${assistantName()} needs your answer`, text: ev.question.question }).catch(() => {})
-        if (get().handsFree) say(`${assistantName()} asks: ${ev.question.question}`)
         if (navigator.vibrate) navigator.vibrate([150, 90, 150])
+        // Asked for by voice: ask you out loud, and pass on what you answer out loud.
+        if (get().handsFree && canTalk()) get().talkAnswer(ev.question)
         break
       case 'question_closed':
         if (get().question?.id === ev.questionId) set({ question: null })
         CallSession.clearAlert().catch(() => {})
+        // Answered on screen, or they stopped waiting: nothing left to talk through.
+        if (useVoiceChat.getState().topic === 'question' && useVoiceChat.getState().open) cancelConversation()
         break
       case 'agent_state':
         set({ agentState: { state: ev.state, detail: ev.detail } })
         break
       case 'summary':
         set({ summary: ev.summary, view: 'summary', awaitingSummary: null })
-        if (get().handsFree) say(['The call is over.', ev.summary?.headline, ev.summary?.summary].filter(Boolean).join(' '))
+        if (get().handsFree) say(['The call is over.', ev.summary?.headline, ev.summary?.summary].filter(Boolean).join(' ')).then(endTalk)
         get().saveCallLocally(s.id)
         get().refreshHistorySoon()
         break
@@ -216,6 +220,17 @@ export const useCallStore = create((set, get) => ({
       default:
         break
     }
+  },
+
+  /** The assistant's question on a live call, asked and answered out loud. */
+  async talkAnswer(question) {
+    const s = get().session
+    const end = await converse({
+      topic: 'question',
+      opening: `${assistantName()} asks: ${question.question}`,
+      context: { question: question.question, goal: s?.goal, with: s ? callWith(s) : '' },
+    })
+    if (end.outcome === 'answer' && get().question?.id === question.id) get().answer(end.text)
   },
 
   callTitle() {
@@ -603,3 +618,6 @@ if (typeof document !== 'undefined') {
 
 // Tapping "Hang up" on the call notification.
 CallSession.addListener?.('hangup', () => useCallStore.getState().hangup())
+
+// Leaving a call asked for by voice ends the spoken conversation that went with it.
+useCallStore.subscribe((s, prev) => { if (prev.handsFree && !s.handsFree) endTalk() })

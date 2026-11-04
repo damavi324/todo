@@ -3,6 +3,7 @@ import { useTaskStore } from '../store/useTaskStore'
 import VoiceReminder from '../plugins/VoiceReminder'
 import { dueDateTime } from './dates'
 import { isReminder } from './taskKind'
+import { speakOut } from './voiceChat'
 
 const isNative = () => Capacitor.isNativePlatform()
 
@@ -84,14 +85,12 @@ export async function announce(title) {
   })
 }
 
-/** Say something in the reminder voice, e.g. hands-free calling telling you what it's doing. */
+/**
+ * Say something out loud in voice mode, e.g. hands-free calling telling you what it's doing. It uses the calling
+ * server's natural voice, never the phone's robotic one: with no server, it stays quiet.
+ */
 export function say(text) {
-  const { settings } = useTaskStore.getState()
-  return VoiceReminder.announce({
-    text,
-    voice: settings.voiceName || '',
-    pitch: Number(settings.voicePitch) || 1,
-  }).catch(() => {})
+  return speakOut(text)
 }
 
 /** Apply "Mark Done" taps made on notifications while the app was closed or in the background. */

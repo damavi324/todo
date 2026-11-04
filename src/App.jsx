@@ -8,6 +8,8 @@ import TaskEditor from './components/TaskEditor'
 import Settings from './components/Settings'
 import Calls, { LogsSheet } from './components/Calls'
 import VoiceAssistant from './components/VoiceAssistant'
+import VoiceChat from './components/VoiceChat'
+import { useVoiceChat } from './lib/voiceChat'
 import { IconButton } from './components/ui'
 import { useTaskStore } from './store/useTaskStore'
 import { useCallStore } from './store/useCallStore'
@@ -31,6 +33,17 @@ export default function App() {
   // The task being edited, or a new task's starting values. null when the editor is closed.
   const [editor, setEditor] = useState(null)
   const [voiceOpen, setVoiceOpen] = useState(false)
+  // Words to act on as soon as the assistant opens: a new request you made out loud in a spoken conversation.
+  const [voiceText, setVoiceText] = useState('')
+  useEffect(() => useVoiceChat.subscribe((s) => {
+    if (!s.request) return
+    const text = s.request
+    useVoiceChat.setState({ request: '' })
+    setVoiceText(text)
+    setVoiceOpen(false)
+    // A fresh panel each time, so it starts from these words.
+    requestAnimationFrame(() => setVoiceOpen(true))
+  }), [])
   const callView = useCallStore((s) => s.view)
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Phones only: the Lists tab, which shows every view and list to pick from.
@@ -185,7 +198,7 @@ export default function App() {
           <div className="fixed right-4 bottom-[calc(84px+env(safe-area-inset-bottom,0px))] md:right-6 md:bottom-6 z-30 flex flex-col items-center gap-3">
             <button
               type="button"
-              onClick={() => setVoiceOpen(true)}
+              onClick={() => { setVoiceText(''); setVoiceOpen(true) }}
               disabled={voiceOpen}
               aria-label="Ask the assistant: speak or type"
               title="Ask the assistant"
@@ -231,7 +244,8 @@ export default function App() {
 
       {voiceOpen && (
         <VoiceAssistant
-          onClose={() => setVoiceOpen(false)}
+          initialText={voiceText}
+          onClose={() => { setVoiceOpen(false); setVoiceText('') }}
           onTask={handleVoiceTask}
           onCall={(draft) => { setVoiceOpen(false); useCallStore.getState().setDraft(draft); setAppView('calls') }}
         />
@@ -247,6 +261,7 @@ export default function App() {
       )}
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
       <LogsSheet />
+      <VoiceChat />
     </div>
   )
 }
