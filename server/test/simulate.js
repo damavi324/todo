@@ -156,7 +156,14 @@ agentServer.on('connection', (ws, req) => {
       if (msg.name === 'ask_owner') {
         ws.send(JSON.stringify({ type: 'FunctionCallRequest', functions: [{ id: 'fc_2', name: 'press_digits', arguments: '{"digits":"2"}', client_side: true }] }));
       } else if (msg.name === 'press_digits') {
+        // Like a real call: the agent asks to finish while its goodbye is still streaming in.
+        ws.send(JSON.stringify({ type: 'AgentStartedSpeaking' }));
+        ws.send(Buffer.alloc(160, 0x11)); // start of "Thank you so much, he'll be in touch soon"
         ws.send(JSON.stringify({ type: 'FunctionCallRequest', functions: [{ id: 'fc_3', name: 'finish_call', arguments: '{"outcome":"done","note":"booked"}', client_side: true }] }));
+        setTimeout(() => {
+          ws.send(Buffer.alloc(160, 0x22)); // the rest of the goodbye, arriving after the request
+          ws.send(JSON.stringify({ type: 'AgentAudioDone' }));
+        }, 400);
       }
     }
   });
@@ -492,6 +499,8 @@ try {
   assert.equal(finResp.id, 'fc_3');
   const mark = await waitFor(() => toTwilio.find((m) => m.event === 'mark'), 'mark');
   assert.equal(mark.mark.name, 'hangup');
+  const endOfGoodbye = toTwilio.findIndex((m) => m.event === 'media' && Buffer.from(m.media.payload, 'base64')[0] === 0x22);
+  assert.ok(endOfGoodbye !== -1 && endOfGoodbye < toTwilio.indexOf(mark), 'the hang-up waits until the whole goodbye was sent to the caller');
   tw.send(JSON.stringify({ event: 'mark', streamSid: 'MZ_AGENT', mark: { name: 'hangup' } }));
   const hang = await waitFor(() => twilioCalls.find((c) => c.url.endsWith('/Calls/CA_AGENT_1.json') && c.params.get('Status') === 'completed'), 'hangup');
   assert.ok(hang);

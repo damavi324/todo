@@ -18,6 +18,8 @@ const HELLO_WAIT_MS = Number(process.env.AGENT_HELLO_WAIT_MS) || 2000;
 // Their "Hello?" counts as over after this much quiet, or after this long however much they say (a voicemail greeting).
 const HELLO_QUIET_MS = 450;
 const HELLO_MAX_MS = 5000;
+// After the agent's audio is all sent, this much quiet means its goodbye is over and the call can end.
+const GOODBYE_QUIET_MS = 600;
 
 // Rough loudness of a 20 ms mu-law frame from the caller (0 = silence), for spotting their "Hello?".
 const MULAW = Array.from({ length: 256 }, (_, b) => {
@@ -305,6 +307,16 @@ export function handleAgentStream(twilioWs) {
     for (const f of frames(buf)) sendTwilio({ event: 'media', streamSid, media: { payload: f.toString('base64') } });
   };
 
+  // Ending the call. The agent asks to finish while its goodbye may still be streaming in from Deepgram, so the
+  // "hang up after playback" mark goes to Twilio only once Deepgram says the agent's audio is all sent and a
+  // short quiet spell shows nothing more is coming. Twilio echoes the mark when the goodbye has finished playing.
+  let agentTalking = false;
+  let hangupMarkTimer = null;
+  const markHangupSoon = () => {
+    clearTimeout(hangupMarkTimer);
+    hangupMarkTimer = setTimeout(() => sendTwilio({ event: 'mark', streamSid, mark: { name: 'hangup' } }), GOODBYE_QUIET_MS);
+  };
+
   let hungUp = false;
   const doHangup = async (why) => {
     if (!session?.callSid || hungUp) return;
@@ -346,9 +358,9 @@ export function handleAgentStream(twilioWs) {
       if (args.outcome === 'voicemail') markVoicemail(session);
       hangupRequested = true;
       respond('Hanging up now.');
-      // Hang up once Twilio has played everything queued (mark echo), with a fallback timer.
-      sendTwilio({ event: 'mark', streamSid, mark: { name: 'hangup' } });
-      setTimeout(() => doHangup('fallback timer'), 8000);
+      // Hang up once the goodbye has been fully sent and played (see markHangupSoon), with a fallback timer.
+      if (!agentTalking) markHangupSoon();
+      setTimeout(() => doHangup('fallback timer'), 15000);
     } else {
       respond(`Unknown function ${fn.name}.`);
     }
@@ -396,11 +408,15 @@ export function handleAgentStream(twilioWs) {
         case 'AgentAudioDone':
           protectOpening = false;
           clearTimeout(openingTimer);
+          agentTalking = false;
+          if (hangupRequested) markHangupSoon();
           break;
         case 'AgentThinking':
           emit(session, 'agent_state', { state: 'thinking' });
           break;
         case 'AgentStartedSpeaking':
+          agentTalking = true;
+          clearTimeout(hangupMarkTimer); // more goodbye is on its way; wait for it to finish
           emit(session, 'agent_state', { state: 'talking' });
           break;
         case 'FunctionCallRequest':
@@ -467,7 +483,8 @@ export function handleAgentStream(twilioWs) {
       else if (opened) sendAgent(buf);
       else listenForHello(buf);
     } else if (msg.event === 'mark' && msg.mark?.name === 'hangup' && hangupRequested) {
-      setTimeout(() => doHangup('goodbye played'), 400);
+      // A natural beat after the last word before the line drops.
+      setTimeout(() => doHangup('goodbye played'), 900);
     } else if (msg.event === 'stop') {
       agentWs?.close();
     }
@@ -476,6 +493,7 @@ export function handleAgentStream(twilioWs) {
   twilioWs.on('close', () => {
     clearInterval(keepAlive);
     clearTimeout(openingTimer);
+    clearTimeout(hangupMarkTimer);
     agentWs?.close();
     if (session) session._agent = null;
   });
