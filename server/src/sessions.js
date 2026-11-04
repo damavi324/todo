@@ -103,11 +103,12 @@ export function slog(s, level, text) {
   persist(s);
 }
 
-export function createSession({ mode, to, goal, brief, plan, owner, about, localNow, skills = [], planUsage, voice = '', assistant = '' }) {
+export function createSession({ mode, to, from, goal, brief, plan, owner, about, localNow, skills = [], planUsage, voice = '', assistant = '' }) {
   const s = {
     id: crypto.randomUUID(),
     mode, // 'copilot' | 'agent'
     to,
+    from, // the caller ID the other phone sees
     ownerName: String(owner || '').trim().slice(0, 80) || config.ownerName,
     about: String(about || '').trim().slice(0, 8000),
     // The owner's own date and time, e.g. "Friday 2026-10-30 18:05 America/Chicago", so "next Tuesday"

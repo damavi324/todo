@@ -139,6 +139,7 @@ const env = {
   TWILIO_API_KEY_SECRET: 'secret',
   TWILIO_TWIML_APP_SID: 'AP_TEST',
   TWILIO_PHONE_NUMBER: '+19405550100',
+  TWILIO_CALLER_ID: '+12145550111',
   TWILIO_API_BASE: `http://localhost:${PORTS.twilio}`,
   DEEPGRAM_API_KEY: 'dg_test',
   DEEPGRAM_LISTEN_URL: `ws://localhost:${PORTS.stt}/v1/listen`,
@@ -237,10 +238,10 @@ try {
   r = await req('/twilio/outgoing', { method: 'POST', form: { To: cop.to, sessionId: cop.id, CallSid: 'CA_BROWSER_1', From: 'client:owner' } });
   assert.match(r.text, /<Start><Stream url="wss:\/\/localhost:5591\/streams\/listen" track="both_tracks">/);
   assert.match(r.text, /<Parameter name="sessionId" value="[0-9a-f-]+"\/>/);
-  assert.match(r.text, /<Dial callerId="\+19405550100" answerOnBridge="true" timeLimit="1800" action="https:\/\/localhost:5591\/twilio\/dial-done\?sessionId=/);
+  assert.match(r.text, /<Dial callerId="\+12145550111" answerOnBridge="true" timeLimit="1800" action="https:\/\/localhost:5591\/twilio\/dial-done\?sessionId=/, 'no pick: your caller ID');
   assert.match(r.text, /<Number statusCallbackEvent="answered completed"[^>]*>\+12145550123<\/Number>/);
   assert.match(r.text, /<Number [^>]*machineDetection="Enable" amdStatusCallback="https:\/\/localhost:5591\/twilio\/amd\?sessionId=[^"]+" amdStatusCallbackMethod="POST">/);
-  r = await req('/twilio/outgoing', { method: 'POST', form: { To: '+19405550100', sessionId: cop.id, CallSid: 'CA_BROWSER_1' } });
+  r = await req('/twilio/outgoing', { method: 'POST', form: { To: '+12145550111', sessionId: cop.id, CallSid: 'CA_BROWSER_1' } });
   r = await req(`/api/sessions/${cop.id}`);
   assert.ok(r.json.call.log.some((l) => l.level === 'warn' && /same number the call shows as coming from/.test(l.text)), 'calling your own caller ID is flagged');
   pass('TwiML for in-app dialing: stream both sides, then dial with caller ID');
@@ -345,14 +346,17 @@ try {
   // ---- agent call ----
   r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550199' } });
   assert.equal(r.status, 400);
-  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550199', goal: 'Reschedule cleaning to Tue morning', brief: 'Patient: Mk Khanal' } });
+  r = await req('/api/caller-ids');
+  assert.deepEqual(r.json, { numbers: [{ key: 'caller-id', number: '+12145550111', label: 'Your caller ID' }, { key: 'twilio', number: '+19405550100', label: 'Twilio number' }], default: 'caller-id' });
+  pass('Lists the caller IDs the app can pick from (your caller ID first)');
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550199', goal: 'Reschedule cleaning to Tue morning', brief: 'Patient: Mk Khanal', from: 'twilio' } });
   assert.equal(r.status, 200);
   const ag = r.json.session;
   const create = twilioCalls.find((c) => c.url.endsWith('/Calls.json'));
   assert.ok(create, 'Twilio create call');
   assert.equal(create.url, '/2010-04-01/Accounts/AC_TEST/Calls.json');
   assert.equal(create.params.get('To'), '+12145550199');
-  assert.equal(create.params.get('From'), '+19405550100');
+  assert.equal(create.params.get('From'), '+19405550100', 'picked in the app: the Twilio number');
   assert.match(create.params.get('Twiml'), /<Connect><Stream url="wss:\/\/localhost:5591\/streams\/agent">/);
   assert.deepEqual(create.params.getAll('StatusCallbackEvent'), ['initiated', 'ringing', 'answered', 'completed']);
   assert.equal(create.params.get('MachineDetection'), 'Enable');
@@ -633,7 +637,7 @@ try {
   const aReq = claudeRequests.find((c) => /voice front door/.test(c.json.system));
   assert.equal(aReq.json.model, 'claude-haiku-5-5');
   assert.match(aReq.json.messages[0].content, /Tuesday/);
-  assert.match(aReq.json.messages[0].content, /similar name \(spelling may differ\): Puja Khanal; Bright Smiles Dental\. If they mean one of them, put that exact name in call\.contact/);
+  assert.match(aReq.json.messages[0].content, /similar name \(spelling may differ\): Puja Khanal; Bright Smiles Dental\. Speech-to-text often garbles names .*put that contact's name in call\.contact exactly as written here/);
   assert.match(aReq.json.system, /no relationship words or brackets/);
   pass('Voice assistant: one sentence becomes a task with date/time/list plus a call for Pilot');
 

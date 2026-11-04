@@ -11,7 +11,7 @@ import { useTaskStore } from '../store/useTaskStore'
 import { formatNumber, assistantName, ownerName, isCallPilotReady } from '../lib/callpilot'
 import { startDictation, listenUntilPause } from '../lib/dictation'
 import { say } from '../lib/notifications'
-import { loadPhoneContacts, phoneContacts, mergeContacts, pickByName } from '../lib/phoneContacts'
+import { loadPhoneContacts, phoneContacts, mergeContacts, pickByName, searchContacts } from '../lib/phoneContacts'
 import { formatDue } from '../lib/dates'
 import { addAppointment, addFollowUp, callWith, contactFor, scheduleCallback, callbackTime } from '../lib/callFollowUps'
 import { Button, IconButton, Note, Segmented, Sheet, fieldClass } from './ui'
@@ -180,7 +180,7 @@ function Compose() {
   // Only while the field is in use: leaving it closes the list, so it can't cover the fields below.
   const matches = !picking ? []
     : /[a-z]/i.test(query)
-      ? everyone.filter((c) => c.name.toLowerCase().includes(query)).slice(0, 8)
+      ? searchContacts(everyone, query)
       : typedDigits.length >= 3 && !contact
         ? everyone.filter((c) => c.phone.replace(/\D/g, '').includes(typedDigits)).slice(0, 5)
         : !query ? everyone.slice(0, 8) : []

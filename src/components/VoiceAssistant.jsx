@@ -10,7 +10,7 @@ import { PRIORITY_COLOR } from '../lib/views'
 import { useCallStore } from '../store/useCallStore'
 import SpeechCapture from '../plugins/SpeechCapture'
 import { useBack } from '../lib/backStack'
-import { mergeContacts, phoneContacts, pickByName, likelyContacts } from '../lib/phoneContacts'
+import { mergeContacts, phoneContacts, loadPhoneContacts, pickByName, likelyContacts } from '../lib/phoneContacts'
 
 
 function localNow() {
@@ -69,11 +69,13 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall: hand
         setWaking(false)
         if (!up) throw new Error('The calling server didn’t wake up, so I used the basic parser.')
       }
-      const people = mergeContacts(useTaskStore.getState().contacts, phoneContacts())
+      // The phone's contacts are read once per app start; don't rely on the Calls screen having opened first.
+      const people = mergeContacts(useTaskStore.getState().contacts, phoneContacts().length ? phoneContacts() : await loadPhoneContacts())
       const { result: r, usage } = await cp('/api/assistant', { text: heard, ...callerContext(), ...localNow(), lists: lists.map((l) => ({ id: l.id, name: l.name })), contacts: likelyContacts(people, heard) }, { timeoutMs: 45000 })
-      // The name it heard, matched to a saved or phone contact, gives the number.
-      if (r.call && !r.call.to && r.call.contact) {
-        const who = pickByName(people, r.call.contact)
+      // The name it heard, matched to a saved or phone contact, gives the number. If that name was garbled,
+      // look for a contact's name anywhere in what you said.
+      if (r.call && !r.call.to) {
+        const who = (r.call.contact && pickByName(people, r.call.contact)) || pickByName(people, heard, { inSpeech: true })
         if (who) r.call = { ...r.call, to: who.phone, contact: who.name }
       }
       recordOtherUsage('assistant', usage)

@@ -58,7 +58,7 @@ export async function interpret({ text, now, timezone, weekday, lists, owner, ab
     '',
     about ? `About ${s(owner, 80) || config.ownerName}, true on every call: ${s(about, 4000)}` : '',
     Array.isArray(contacts) && contacts.length
-      ? `Contacts on their phone with a similar name (spelling may differ): ${contacts.slice(0, 12).map((c) => s(c, 80)).filter(Boolean).join('; ')}. If they mean one of them, put that exact name in call.contact.`
+      ? `Contacts on their phone with a similar name (spelling may differ): ${contacts.slice(0, 12).map((c) => s(c, 80)).filter(Boolean).join('; ')}. Speech-to-text often garbles names ("Kesar Raz" for "Keshab Raj"), so if what they said sounds like one of them, put that contact's name in call.contact exactly as written here.`
       : '',
     `They said: "${spoken}"`,
   ].join('\n');

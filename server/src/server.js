@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
-import { config, assistantNameOf, configProblems, publicUrl, publicWss } from './config.js';
+import { config, assistantNameOf, configProblems, publicUrl, publicWss, callerIds, fromNumber } from './config.js';
 import { voiceAccessToken, createCall, hangupCall, toE164, twiml, streamParams, xml } from './twilio.js';
 import {
   broadcast,
@@ -126,10 +126,10 @@ function serveStatic(req, res, pathname) {
 
 /** Notes the caller ID the other phone will see, and warns about calling the number the call comes from. */
 function logCallerId(s, to) {
-  const from = config.twilio.callerId;
+  const from = s.from || config.twilio.callerId;
   slog(s, 'info', `Calling ${to} from caller ID ${from}`);
   if (toE164(from) === to) {
-    slog(s, 'warn', `You are calling the same number the call shows as coming from (${from}). Phone carriers send a call from your own number straight to voicemail. Call a different phone, or set TWILIO_CALLER_ID to another number.`);
+    slog(s, 'warn', `You are calling the same number the call shows as coming from (${from}). Phone carriers send a call from your own number straight to voicemail. Call a different phone, or pick the other caller ID in Settings → Calling.`);
   }
 }
 
@@ -152,7 +152,7 @@ function outgoingTwiml(params) {
       // Tell us (without holding up the call) whether a person or voicemail picked up.
       ` machineDetection="Enable" amdStatusCallback="${xml(publicUrl(`/twilio/amd?sessionId=${session.id}`))}" amdStatusCallbackMethod="POST"`
     : '';
-  return `${stream}<Dial callerId="${xml(config.twilio.callerId)}" answerOnBridge="true" timeLimit="${config.maxCallMinutes * 60}"${action}><Number${numberCb}>${xml(to)}</Number></Dial>`;
+  return `${stream}<Dial callerId="${xml(session?.from || fromNumber())}" answerOnBridge="true" timeLimit="${config.maxCallMinutes * 60}"${action}><Number${numberCb}>${xml(to)}</Number></Dial>`;
 }
 
 const ENDED = new Set(['completed', 'busy', 'no-answer', 'failed', 'canceled']);
@@ -242,7 +242,7 @@ async function route(req, res) {
       // Which deploy is running (Cloud Run sets K_REVISION), so it's easy to see whether a push went live.
       revision: process.env.K_REVISION || null,
       assistant: config.assistantName,
-      callerId: config.twilio.callerId,
+      callerId: fromNumber(),
       api: 2,
     });
   }
@@ -275,6 +275,9 @@ async function route(req, res) {
       return send(res, 502, { error: `Could not record that voice: ${err.message}` });
     }
   }
+  if (p === '/api/caller-ids' && method === 'GET') {
+    return send(res, 200, { numbers: callerIds(), default: callerIds()[0]?.key || '' });
+  }
   if (p === '/api/usage' && method === 'GET') {
     return send(res, 200, await accountUsage());
   }
@@ -304,7 +307,7 @@ async function route(req, res) {
   if (p === '/api/assistant' && method === 'POST') {
     const body = await readBody(req);
     try {
-      log(`[assistant] heard: ${String(body.text || '').slice(0, 160)}`);
+      log(`[assistant] heard: ${String(body.text || '').slice(0, 160)} (${Array.isArray(body.contacts) ? body.contacts.length : 0} similar contacts sent)`);
       const usage = {};
       const result = await interpret(body, usage);
       log(`[assistant] understood as ${result.kind}${result.task ? ` | task: ${result.task.title}` : ''}${result.call ? ` | call: ${result.call.contact || result.call.to || '?'} (${result.call.when})` : ''}`);
@@ -355,13 +358,13 @@ async function route(req, res) {
     body.goal = String(body.goal || '').slice(0, 2000);
     body.brief = String(body.brief || '').slice(0, 40000);
     if (mode === 'agent' && !body.goal?.trim()) return send(res, 400, { error: 'Tell the agent what the call is for' });
-    const s = createSession({ mode, to, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', assistant: body.assistant });
+    const s = createSession({ mode, to, from: fromNumber(body.from), goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', assistant: body.assistant });
     if (mode === 'agent') {
       logCallerId(s, to);
       try {
         const call = await createCall({
           To: to,
-          From: config.twilio.callerId,
+          From: s.from,
           Twiml: twiml(`<Connect><Stream url="${xml(publicWss('/streams/agent'))}">${streamParams({ sessionId: s.id })}</Stream></Connect>`),
           StatusCallback: publicUrl(`/twilio/status?sessionId=${s.id}`),
           StatusCallbackMethod: 'POST',

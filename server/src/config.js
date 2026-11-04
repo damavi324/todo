@@ -83,6 +83,26 @@ export function configProblems() {
   return p;
 }
 
+/**
+ * The numbers calls may show as coming from, picked per call in the app (Settings → Calling). Only numbers set
+ * on the server can be used, so the app can't make a call look like it comes from anyone else.
+ * 'caller-id' (TWILIO_CALLER_ID, your verified own number) is the default when it is set.
+ */
+export function callerIds() {
+  const t = config.twilio;
+  const list = [];
+  const own = clean(process.env.TWILIO_CALLER_ID);
+  if (own) list.push({ key: 'caller-id', number: own, label: 'Your caller ID' });
+  if (t.phoneNumber && t.phoneNumber !== own) list.push({ key: 'twilio', number: t.phoneNumber, label: 'Twilio number' });
+  return list;
+}
+
+/** The number a call goes out from: the one the app picked (by key), else the default. */
+export function fromNumber(key) {
+  const list = callerIds();
+  return (list.find((c) => c.key === key) || list[0])?.number || config.twilio.callerId;
+}
+
 export const publicUrl = (p) => `https://${config.publicHost}${p}`;
 export const publicWss = (p) => `wss://${config.publicHost}${p}`;
 

@@ -5,6 +5,7 @@ import { useCallStore } from '../store/useCallStore'
 import { connectCallPilot, disconnectCallPilot, normalizeServerUrl } from '../lib/callpilot'
 import { Button, Note, fieldClass } from './ui'
 import CallVoicePicker from './CallVoicePicker'
+import CallerIdPicker from './CallerIdPicker'
 
 /** Settings → Calling: connect the app to your CallPilot server, and what the assistant knows about you. */
 export default function CallingSettings() {
@@ -61,6 +62,7 @@ export default function CallingSettings() {
           )}
         </div>
       </form>
+      {settings.callpilotConnected && <CallerIdPicker />}
       {settings.callpilotConnected && <CallVoicePicker />}
       <p className="px-4 py-3 text-xs text-ink-3">The assistant calls on behalf of the name and details in your profile above.</p>
     </>
