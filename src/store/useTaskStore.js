@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { parseLocalDate, startOfToday, addDays, dueDateTime } from '../lib/dates'
-import { isReminder } from '../lib/taskKind'
+import { isReminder, reminderGone } from '../lib/taskKind'
 
 export const DEFAULT_LISTS = [
   { id: 'inbox', name: 'Inbox', color: '#4772FA' },
@@ -128,10 +128,10 @@ export const useTaskStore = create(
         ),
       })),
 
-      // A reminder has nothing to finish, so once its day is over it is simply removed.
+      // A reminder has nothing to finish, so once its day is over it is simply removed (a kept booking, two weeks later).
       dropPastReminders: () => set((s) => {
         const today = startOfToday()
-        const kept = s.tasks.filter((t) => !(isReminder(t) && !t.retain && t.dueDate && parseLocalDate(t.dueDate) < today))
+        const kept = s.tasks.filter((t) => !(t.dueDate && reminderGone(t, today, parseLocalDate(t.dueDate))))
         return kept.length === s.tasks.length ? s : { tasks: kept }
       }),
 

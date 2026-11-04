@@ -159,17 +159,17 @@ export function introOf(s) {
   return parts.join(' ');
 }
 
-/** The full call instructions, rewritten so the model listens to audio it is about to receive instead of talking over it. */
+/**
+ * A correction added to the call instructions so the model listens to audio it is about to receive instead of
+ * talking over it. UpdatePrompt adds to the prompt, so only the change is sent, not the whole prompt again.
+ */
 function listenInstead(s) {
   const line = greetingOf(s);
-  const base = agentPrompt(s).replace(
-    `- You have already said your first line: "${line}" Never say it again.`,
-    '- You have not spoken yet. Audio from the start of the call is arriving now. Listen to it before you say anything.',
-  );
+  const fix = 'CORRECTION: you have NOT said your first line yet; ignore the instruction above that says you already did. Audio from the start of the call is arriving now. Listen to it before you say anything.';
   const now = s.voicemail
     ? 'RIGHT NOW: this is voicemail, not a person. Do not ask questions. Wait for the beep if a greeting is still playing, leave one short message, then call finish_call with outcome "voicemail".'
     : `RIGHT NOW: they were already talking when you connected. Do not talk over them. If it is a voicemail or recorded greeting, wait for the beep, leave one short message, and call finish_call with outcome "voicemail". If it is a person, wait until they pause, then say exactly: "${line}"`;
-  return `${base}\n\n${now}`;
+  return `${fix}\n\n${now}`;
 }
 
 function agentSettings(s) {

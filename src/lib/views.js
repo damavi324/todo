@@ -1,5 +1,5 @@
 import { addDays, dueDateTime, parseLocalDate, startOfToday } from './dates'
-import { isReminder } from './taskKind'
+import { isReminder, reminderGone } from './taskKind'
 
 /** The fixed views. Lists are addressed by their own id. 'scheduled' is kept as the id for Upcoming. */
 export const SMART_VIEWS = [
@@ -28,7 +28,7 @@ const dayLabel = (d) => d.toLocaleDateString('en-US', { weekday: 'long', month: 
 
 /**
  * The open items of a view, in labelled groups, plus its finished ones.
- * Reminders whose day has passed are left out, except a booking you asked to keep.
+ * Reminders whose day has passed are left out, except a booking kept from a call (for two weeks).
  */
 export function groupView(viewId, tasks) {
   const today = startOfToday()
@@ -41,7 +41,7 @@ export function groupView(viewId, tasks) {
   const inView = viewId === 'today' || viewId === 'scheduled' || viewId === 'all'
     ? tasks
     : tasks.filter((t) => t.listId === viewId)
-  const open = inView.filter((t) => !t.completed && !(isReminder(t) && !t.retain && due(t) && due(t) < today)).sort(byDue)
+  const open = inView.filter((t) => !t.completed && !reminderGone(t, today, due(t))).sort(byDue)
   const done = inView
     .filter((t) => t.completed)
     .sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')))
