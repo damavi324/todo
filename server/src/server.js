@@ -261,6 +261,8 @@ async function route(req, res) {
     return send(res, 200, {
       voices: [...VOICES.map(({ id, label }) => ({ id, label, provider: 'deepgram' })), ...await elevenLabsVoices()],
       default: defaultVoiceId(),
+      // Whether ElevenLabs voices can be used (the server has a key), for the app's voice service switch.
+      elevenlabs: { ready: !!config.elevenlabs.apiKey },
       // How the agent thinks on calls: the app picks 'smart' (better reasoning) or 'fast'.
       thinking: { smart: config.deepgram.agentThinkModel, fast: config.deepgram.agentFastThinkModel, ready: !!config.anthropic.apiKey || !thinkUsesOwnKey() },
       // Languages the agent can call in; ready is false (with why) when the server is missing what one needs.

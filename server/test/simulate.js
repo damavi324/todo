@@ -610,6 +610,7 @@ try {
   assert.ok(r.json.voices.some((v) => v.id === 'flux-miles-en' && v.provider === 'deepgram'), 'Deepgram voices stay');
   assert.equal(r.json.default, 'flux-miles-en', 'without ELEVENLABS_VOICE_ID_EN the Deepgram voice stays the default');
   assert.deepEqual(r.json.thinking, { smart: 'claude-sonnet-5-5', fast: 'claude-haiku-4-5', ready: true });
+  assert.deepEqual(r.json.elevenlabs, { ready: true }, 'the app can offer the ElevenLabs voice service');
   assert.equal(elevenCalls.find((c) => c.url === '/v1/voices').key, 'xi_test');
   r = await req('/api/voices/el-EXAVITQu4vr4xnSDxMaL/sample?owner=Mk');
   assert.equal(r.status, 200, 'an ElevenLabs voice can be previewed');

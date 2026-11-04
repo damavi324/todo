@@ -4,6 +4,11 @@ import { useTaskStore } from '../store/useTaskStore'
 import { cp, apiUrl, ownerName, assistantName } from '../lib/callpilot'
 import { ErrorNote, Segmented } from './ui'
 
+const SERVICES = [
+  { value: 'elevenlabs', label: 'ElevenLabs' },
+  { value: 'deepgram', label: 'Deepgram' },
+]
+
 const THINKING = [
   { value: 'smart', label: 'Smarter' },
   { value: 'fast', label: 'Faster' },
@@ -50,10 +55,25 @@ export default function CallVoicePicker() {
   }
   const thinking = settings.callThinking || 'smart'
   // Older servers don't say which voices are ElevenLabs': all of them are Deepgram's.
-  const groups = [
-    { title: 'ElevenLabs voices · most natural', voices: list?.voices.filter((v) => v.provider === 'elevenlabs') || [] },
-    { title: 'Deepgram voices', voices: list?.voices.filter((v) => v.provider !== 'elevenlabs') || [] },
-  ].filter((g) => g.voices.length)
+  const byService = {
+    elevenlabs: list?.voices.filter((v) => v.provider === 'elevenlabs') || [],
+    deepgram: list?.voices.filter((v) => v.provider !== 'elevenlabs') || [],
+  }
+  // The voice service is whichever one the chosen voice belongs to; it applies from the next call, no restart.
+  const service = chosen.startsWith('el-') ? 'elevenlabs' : 'deepgram'
+  const [serviceNote, setServiceNote] = useState('')
+  const chooseService = (next) => {
+    setServiceNote('')
+    if (next === service) return
+    const voices = byService[next]
+    if (!voices.length) {
+      setServiceNote(next === 'elevenlabs'
+        ? (list.elevenlabs?.ready ? 'Couldn’t load your ElevenLabs voices. Check the ElevenLabs key on the server, then reopen this page.' : 'Add your ElevenLabs key to the calling server (ELEVENLABS_API_KEY) to use ElevenLabs voices.')
+        : 'No Deepgram voices are available.')
+      return
+    }
+    updateSettings({ callVoice: (voices.find((v) => v.id === list.default) || voices[0]).id })
+  }
 
   if (error && !list) return <div className="p-4"><ErrorNote tone="warn">{error}</ErrorNote></div>
   if (!list) return <p className="p-4 text-xs text-ink-3 flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" />Loading voices…</p>
@@ -83,16 +103,24 @@ export default function CallVoicePicker() {
           )}
         </div>
       )}
+      {list.elevenlabs && (
+        <div className="mb-4">
+          <p className="text-sm text-ink">Voice service</p>
+          <p className="text-xs text-ink-3 mt-0.5 mb-2">
+            {service === 'elevenlabs'
+              ? 'ElevenLabs: the most natural voices. If it ever fails mid-call, a Deepgram voice takes over.'
+              : 'Deepgram: quick and clear, included in the calling price.'}
+            {' '}Switching applies from your next call.
+          </p>
+          <Segmented value={service} onChange={chooseService} options={SERVICES} />
+          {serviceNote && <ErrorNote tone="warn" className="mt-2">{serviceNote}</ErrorNote>}
+        </div>
+      )}
       <p className="text-sm text-ink">Assistant’s voice on calls</p>
       <p className="text-xs text-ink-3 mt-0.5 mb-2">Play a sample, then pick one. It sounds like a phone line, because that’s how the other person hears it.</p>
       {error && <ErrorNote tone="warn" className="mb-2">{error}</ErrorNote>}
-      {groups.map((g) => (
-        <div key={g.title} className="mb-3 last:mb-0">
-          {groups.length > 1 && <p className="text-xs font-medium text-ink-3 mb-1.5 px-1">{g.title}</p>}
-          <VoiceList voices={g.voices} chosen={chosen} defaultId={list.default} playing={playing} play={play}
-            choose={(id) => updateSettings({ callVoice: id })} />
-        </div>
-      ))}
+      <VoiceList voices={list.elevenlabs ? byService[service] : list.voices} chosen={chosen} defaultId={list.default} playing={playing} play={play}
+        choose={(id) => updateSettings({ callVoice: id })} />
     </div>
   )
 }
