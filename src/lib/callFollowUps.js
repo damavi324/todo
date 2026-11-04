@@ -22,7 +22,7 @@ export function callWith(call) {
 
 const source = (call) => `From ${assistantName()}'s call with ${callWith(call)}`
 
-/** Something booked on the call: it alerts once at its time and goes on the calendar like any dated task. */
+/** Something booked on the call: it alerts once at its time, and stays in the list so you can look it up afterward. */
 export function addAppointment(appt, call) {
   return saveTask({
     title: appt.title,
@@ -32,6 +32,7 @@ export function addAppointment(appt, call) {
     priority: 'none',
     listId: 'inbox',
     kind: 'reminder',
+    retain: true,
   })
 }
 
@@ -48,31 +49,42 @@ export function addFollowUp(item, call) {
   })
 }
 
-/** When to try again: in an hour, tomorrow morning, or 9:00 on a given day. */
-export function callbackTime(when) {
+const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/
+
+/** When to try again: in an hour, tomorrow morning, or the day and time they named (9:00 when no hour was said). */
+export function callbackTime(when, time) {
   const now = new Date()
   if (when === '1h') {
     const at = new Date(now.getTime() + 60 * 60 * 1000)
     at.setMinutes(Math.ceil(at.getMinutes() / 5) * 5, 0, 0)
     return { dueDate: toLocalYMD(at), dueTime: toLocalHM(at) }
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(when)) return { dueDate: when, dueTime: '09:00' }
-  return { dueDate: toLocalYMD(addDays(now, 1)), dueTime: '09:00' }
+  const clock = CLOCK.test(time) ? time : '09:00'
+  if (/^\d{4}-\d{2}-\d{2}$/.test(when)) return { dueDate: when, dueTime: clock }
+  return { dueDate: toLocalYMD(addDays(now, 1)), dueTime: clock }
 }
 
 /**
  * A task to make the call again later. It carries the call, so when it comes due one tap hands it back to
  * the assistant with the same number and details.
  */
-export function scheduleCallback(call, when) {
+export function scheduleCallback(call, when, time) {
   const contact = contactFor(call.to)
   return saveTask({
     title: `Call ${callWith(call)} again`,
     notes: call.goal || '',
-    ...callbackTime(when),
+    ...callbackTime(when, time),
     priority: 'none',
     listId: 'inbox',
     kind: 'task',
-    call: { to: call.to, contact: contact?.name || '', goal: call.goal || '', details: call.brief || '', mode: call.mode || 'agent' },
+    call: {
+      to: call.to,
+      contact: contact?.name || '',
+      goal: call.goal || '',
+      details: call.brief || '',
+      mode: call.mode || 'agent',
+      // The plan from this call, so the reminder dials with it instead of writing a new one.
+      plan: call.plan || null,
+    },
   })
 }

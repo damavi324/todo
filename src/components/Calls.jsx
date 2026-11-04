@@ -451,6 +451,13 @@ function Transcript({ lines, partials = NO_PARTIALS, live = false }) {
   )
 }
 
+/** Yes and No only when the question is actually yes or no. A choice or an open question is typed or spoken. */
+function isYesNo(question) {
+  const t = String(question || '').trim()
+  if (/\bor\b/i.test(t)) return false
+  return /^(is|are|am|do|does|did|can|could|would|should|will|may|have|has)\b/i.test(t)
+}
+
 function QuestionCard({ question, answer }) {
   const [text, setText] = useState('')
   const [listening, setListening] = useState(null)
@@ -484,8 +491,12 @@ function QuestionCard({ question, answer }) {
           {listening ? <MicOff size={14} /> : <Mic size={14} />}{listening ? 'Listening' : 'Speak'}
         </Button>
         <Button type="submit" variant="primary" size="sm" className="flex-1" disabled={!text.trim()}>Send</Button>
-        <Button size="sm" onClick={() => send('Yes, that works.')}>Yes</Button>
-        <Button size="sm" onClick={() => send('No. Say I’ll follow up.')}>No</Button>
+        {isYesNo(question.question) && (
+          <>
+            <Button size="sm" onClick={() => send('Yes.')}>Yes</Button>
+            <Button size="sm" onClick={() => send('No.')}>No</Button>
+          </>
+        )}
       </div>
     </form>
   )
@@ -647,7 +658,7 @@ function CallOutcome({ call, summary, error }) {
                 <ListPlus size={16} className="text-ink-3 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-ink">{f.title}</p>
-                  {f.date && <p className="text-xs text-ink-3">{formatDue(f.date, f.time)}</p>}
+                  {f.date && <p className="text-xs text-ink-3">{formatDue(f.date, f.time || '09:00')}</p>}
                 </div>
                 <Button size="sm" variant={added[`f${i}`] ? 'ghost' : 'secondary'} disabled={added[`f${i}`]}
                   onClick={run(`f${i}`, () => addFollowUp(f, call), 'Added to tasks')}>
@@ -663,9 +674,9 @@ function CallOutcome({ call, summary, error }) {
         <Block title="Try again">
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={redial}><RotateCcw size={14} />Call again now</Button>
-            {suggested && suggested !== '1h' && suggested !== 'tomorrow' && (
-              <Button size="sm" disabled={added.cbS} onClick={run('cbS', () => scheduleCallback(call, suggested), 'I’ll remind you to call back')}>
-                {added.cbS ? <Check size={14} /> : <Clock size={14} />}{added.cbS ? 'Reminder set' : formatDue(callbackTime(suggested).dueDate, callbackTime(suggested).dueTime)}
+            {suggested && suggested !== '1h' && (suggested !== 'tomorrow' || summary.callback_time) && (
+              <Button size="sm" disabled={added.cbS} onClick={run('cbS', () => scheduleCallback(call, suggested, summary.callback_time), 'I’ll remind you to call back')}>
+                {added.cbS ? <Check size={14} /> : <Clock size={14} />}{added.cbS ? 'Reminder set' : formatDue(callbackTime(suggested, summary.callback_time).dueDate, callbackTime(suggested, summary.callback_time).dueTime)}
               </Button>
             )}
             <Button size="sm" disabled={added.cb1} onClick={run('cb1', () => scheduleCallback(call, '1h'), 'I’ll remind you in an hour')}>

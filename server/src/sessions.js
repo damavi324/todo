@@ -389,6 +389,7 @@ export function normalizeSummary(n) {
     appointments: Array.isArray(n.appointments) ? n.appointments.map(dated).filter((a) => a.title && a.date).slice(0, 5) : [],
     action_items: Array.isArray(n.action_items) ? n.action_items.map(dated).filter((a) => a.title).slice(0, 10) : [],
     callback_after: /^(1h|tomorrow|\d{4}-\d{2}-\d{2})$/.test(callback) ? callback : '',
+    callback_time: TIME.test(n.callback_time) ? n.callback_time : '',
   };
 }
 
@@ -409,12 +410,13 @@ async function summarize(s) {
       system:
         `You write post-call notes for ${s.ownerName || config.ownerName}'s personal assistant. Be factual; never invent details not in the transcript. ` +
         'appointments lists only things actually booked or agreed on the call that happen at a set day (and time, if one was agreed): use YYYY-MM-DD and 24-hour HH:mm, worked out from the owner\'s current date, and "" for an unknown time. ' +
-        'action_items are follow-ups the owner still has to do; give each a due date only if one was said. ' +
+        'action_items are follow-ups the owner still has to do; give each a due date only if one was said, and a 24-hour HH:mm time when an hour was said, else "". ' +
         'callback_after is set only when the call should be tried again later (no answer, busy, closed, asked to call back): "1h", "tomorrow" or a YYYY-MM-DD date; otherwise "". ' +
+        'callback_time is the 24-hour HH:mm they asked to be called back, and "" when they did not name an hour. ' +
         'Reply ONLY with JSON: {"outcome":"done|needs_you|failed|no_answer|voicemail","headline":"<under 12 words>","summary":"<2-4 sentences>","key_facts":["dates, times, prices, names, reference numbers"],' +
         '"appointments":[{"title":"<e.g. Dentist cleaning at Bright Smiles>","date":"YYYY-MM-DD","time":"HH:mm or empty"}],' +
-        '"action_items":[{"title":"<follow-up for ' + (s.ownerName || config.ownerName) + '>","date":"YYYY-MM-DD or empty"}],' +
-        '"callback_after":""}',
+        '"action_items":[{"title":"<follow-up for ' + (s.ownerName || config.ownerName) + '>","date":"YYYY-MM-DD or empty","time":"HH:mm or empty"}],' +
+        '"callback_after":"","callback_time":""}',
       prompt: `Owner's current date and time: ${s.localNow || new Date().toISOString()}\nCall to ${s.to}. Goal: ${s.goal || '(not given)'}\nAbout them: ${(s.about || '(none)').slice(0, 2000)}\nThis call: ${(s.brief || '(none)').slice(0, 8000)}
 Plan objective: ${s.plan?.objective || '(none)'}\nMode: ${s.mode}
 ${s.agentOutcome ? `The AI agent reported the call as: ${s.agentOutcome.outcome}${s.agentOutcome.note ? ` (${s.agentOutcome.note})` : ''}\n` : ''}${s.voicemail ? 'This call reached VOICEMAIL: no person answered. outcome must be "voicemail". Say plainly that it went to voicemail and what message was left; never describe it as a conversation, and nothing was agreed or booked.\n' : ''}

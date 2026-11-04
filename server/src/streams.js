@@ -159,6 +159,19 @@ export function introOf(s) {
   return parts.join(' ');
 }
 
+/** The full call instructions, rewritten so the model listens to audio it is about to receive instead of talking over it. */
+function listenInstead(s) {
+  const line = greetingOf(s);
+  const base = agentPrompt(s).replace(
+    `- You have already said your first line: "${line}" Never say it again.`,
+    '- You have not spoken yet. Audio from the start of the call is arriving now. Listen to it before you say anything.',
+  );
+  const now = s.voicemail
+    ? 'RIGHT NOW: this is voicemail, not a person. Do not ask questions. Wait for the beep if a greeting is still playing, leave one short message, then call finish_call with outcome "voicemail".'
+    : `RIGHT NOW: they were already talking when you connected. Do not talk over them. If it is a voicemail or recorded greeting, wait for the beep, leave one short message, and call finish_call with outcome "voicemail". If it is a person, wait until they pause, then say exactly: "${line}"`;
+  return `${base}\n\n${now}`;
+}
+
 function agentSettings(s) {
   const d = config.deepgram;
   return {
@@ -227,6 +240,11 @@ export function handleAgentStream(twilioWs) {
   // Until the first line is said, their audio is held back from the agent, so it can't answer their "Hello?"
   // itself and skip the line. hello: { start, speechFrames, lastSpeech } while listening for it.
   let opened = false;
+  // Their audio during the hello wait, so a long greeting can be heard instead of talked over.
+  const helloAudio = [];
+  // The scripted first line is still playing. Their "hello" must not wipe it.
+  let protectOpening = false;
+  let openingTimer = null;
   const hello = { start: 0, speechFrames: 0, lastSpeech: 0 };
 
   const sendTwilio = (obj) => {
@@ -236,15 +254,27 @@ export function handleAgentStream(twilioWs) {
     if (agentWs?.readyState === WebSocket.OPEN) agentWs.send(typeof obj === 'string' || Buffer.isBuffer(obj) ? obj : JSON.stringify(obj));
   };
   // Say the first line exactly as written, then let their audio through to the agent.
+  // Someone who is already talking (a receptionist, a voicemail greeting) is listened to instead.
   const openCall = (why) => {
     if (opened) return;
     opened = true;
     clearTimeout(helloTimer);
     log('[agent] first line (' + why + ')');
+    if (why === 'they kept talking' || session.voicemail) {
+      sendAgent({ type: 'UpdatePrompt', prompt: listenInstead(session) });
+      for (const buf of helloAudio) sendAgent(buf);
+      helloAudio.length = 0;
+      return;
+    }
+    protectOpening = true;
     sendAgent({ type: 'InjectAgentMessage', message: greetingOf(session) });
+    // If the spoken line never reports that it finished, allow interruptions again.
+    clearTimeout(openingTimer);
+    openingTimer = setTimeout(() => { protectOpening = false; }, 8000);
   };
   const listenForHello = (buf) => {
     const now = Date.now();
+    if (helloAudio.length < 250) helloAudio.push(buf); // ~5s of what they said before we speak
     if (loudness(buf) > SPEECH_LEVEL) {
       hello.speechFrames++;
       hello.lastSpeech = now;
@@ -342,7 +372,12 @@ export function handleAgentStream(twilioWs) {
           addLine(session, msg.role === 'assistant' ? 'agent' : 'them', msg.content);
           break;
         case 'UserStartedSpeaking':
+          if (protectOpening) break; // the opening line is still playing; don't cut off who is calling
           sendTwilio({ event: 'clear', streamSid }); // barge-in: drop queued agent audio
+          break;
+        case 'AgentAudioDone':
+          protectOpening = false;
+          clearTimeout(openingTimer);
           break;
         case 'AgentThinking':
           emit(session, 'agent_state', { state: 'thinking' });
@@ -368,6 +403,7 @@ export function handleAgentStream(twilioWs) {
     agentWs.on('close', (code, reason) => {
       clearInterval(keepAlive);
       clearTimeout(helloTimer);
+      clearTimeout(openingTimer);
       (code === 1000 || code === 1005 ? log : console.warn)(`[agent] Deepgram connection closed (${code}${reason?.length ? ` ${reason}` : ''})`);
     });
   }
@@ -410,6 +446,7 @@ export function handleAgentStream(twilioWs) {
 
   twilioWs.on('close', () => {
     clearInterval(keepAlive);
+    clearTimeout(openingTimer);
     agentWs?.close();
     if (session) session._agent = null;
   });

@@ -105,7 +105,11 @@ agentServer.on('connection', (ws, req) => {
       agentLog.settings = msg;
       ws.send(JSON.stringify({ type: 'SettingsApplied' }));
     } else if (msg.type === 'KeepAlive') agentLog.keepAlives++;
-    else if (msg.type === 'InjectAgentMessage') agentLog.injected.push(msg.message);
+    else if (msg.type === 'InjectAgentMessage') {
+      agentLog.injected.push(msg.message);
+      // The opening line has finished, so a later interruption may clear queued audio.
+      ws.send(JSON.stringify({ type: 'AgentAudioDone' }));
+    }
     else if (msg.type === 'UpdatePrompt') (agentLog.prompts ||= []).push(msg.prompt);
     else if (msg.type === 'FunctionCallResponse') {
       agentLog.responses.push(msg);

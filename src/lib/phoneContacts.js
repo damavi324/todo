@@ -43,9 +43,13 @@ export function mergeContacts(appContacts, phone) {
 }
 
 // Words people say around a name ("my wife Pooja", "Pooja (wife)") that aren't part of it.
-const RELATIONS = new Set(['my', 'the', 'wife', 'husband', 'mom', 'mum', 'mother', 'dad', 'father', 'son', 'daughter',
+const RELATIONS = new Set(['my', 'the', 'wife', 'husband', 'mom', 'mum', 'mother', 'mommy', 'mama', 'dad', 'father', 'daddy', 'papa', 'son', 'daughter',
   'brother', 'sister', 'friend', 'boss', 'dr', 'doctor', 'mr', 'mrs', 'ms', 'miss', 'aunt', 'uncle', 'grandma', 'grandpa',
-  'cousin', 'partner', 'girlfriend', 'boyfriend', 'office', 'call', 'phone', 'ring'])
+  'cousin', 'partner', 'girlfriend', 'boyfriend', 'hubby', 'office', 'call', 'phone', 'ring'])
+
+// "Call my mother" and "call Mom" are the same contact.
+const SAME_PERSON = { mum: 'mom', mother: 'mom', mommy: 'mom', mama: 'mom', father: 'dad', daddy: 'dad', papa: 'dad', hubby: 'husband' }
+const relationToken = (w) => SAME_PERSON[w] || w
 
 /**
  * Spelling-tolerant form of a name word: Pooja = Puja, Shree = Shri, Bhattarai = Battarai, Matthew = Mathew,
@@ -62,6 +66,22 @@ export function nameKey(word) {
 const words = (text) => String(text || '').toLowerCase().replace(/\([^)]*\)/g, ' ').split(/[^a-z\u00c0-\u024f]+/).filter(Boolean)
 /** The words of what was said that could be part of a name. */
 const nameWords = (text) => words(text).filter((w) => !RELATIONS.has(w)).map(nameKey).filter((k) => k.length >= 2)
+
+// Titles and filler. A contact can actually be named Mom or Wife, so those stay available as names.
+const NOT_A_NAME = new Set(['my', 'the', 'call', 'phone', 'ring', 'office', 'dr', 'doctor', 'mr', 'mrs', 'ms', 'miss'])
+
+/** A contact whose whole name is a word like Mom or Wife, when that word was said. */
+function namedByRelation(contacts, text) {
+  const said = words(text).filter((w) => RELATIONS.has(w) && !NOT_A_NAME.has(w)).map(relationToken)
+  if (!said.length) return []
+  const hits = contacts.filter((c) => {
+    const name = words(c.name).filter((w) => !NOT_A_NAME.has(w))
+    return name.length === 1 && said.includes(relationToken(name[0]))
+  })
+  const people = [...new Set(hits.map((c) => c.name.toLowerCase()))]
+  if (people.length !== 1) return []
+  return hits.filter((c) => c.name.toLowerCase() === people[0])
+}
 
 /** Letters added, dropped, changed or swapped to turn a into b (stops counting past max). */
 function edits(a, b, max) {
@@ -123,7 +143,11 @@ export function pickByName(contacts, text, { inSpeech = false } = {}) {
   let found = contacts.filter((c) => c.name.toLowerCase() === q)
   if (!found.length) {
     const said = nameWords(q)
-    if (!said.length) return null
+    if (!said.length) {
+      const named = namedByRelation(contacts, q)
+      if (!named.length) return null
+      return named.find((c) => /mobile|cell/i.test(c.label || '')) || named[0]
+    }
     const ok = (f) => f.score > 0 && (inSpeech
       ? (f.size === 1 ? f.exact === 1 && f.shortest >= 4 : f.hit >= 2 && f.ofName >= 0.6)
       // Most of the words said belong to the name ("Kesar Raz Pandey" -> 3 of 3), not just one common word.
@@ -144,7 +168,11 @@ export function pickByName(contacts, text, { inSpeech = false } = {}) {
       if (hinted.length !== 1) return null
       ranked = hinted
     }
-    if (!ranked.length) return null
+    if (!ranked.length) {
+      const named = namedByRelation(contacts, q)
+      if (!named.length) return null
+      return named.find((c) => /mobile|cell/i.test(c.label || '')) || named[0]
+    }
     found = contacts.filter((c) => c.name.toLowerCase() === ranked[0].name)
   }
   if (new Set(found.map((c) => c.name.toLowerCase())).size !== 1) return null
@@ -154,12 +182,15 @@ export function pickByName(contacts, text, { inSpeech = false } = {}) {
 /** Contacts whose names sound like words in what was said, best fit first, for the assistant to choose from (names only). */
 export function likelyContacts(contacts, text, max = 12) {
   const said = nameWords(text)
-  if (!said.length) return []
   const best = new Map()
-  for (const c of contacts) {
-    const { score } = fit(c, said)
-    if (score > (best.get(c.name) || 0)) best.set(c.name, score)
+  for (const c of namedByRelation(contacts, text)) best.set(c.name, 10)
+  if (said.length) {
+    for (const c of contacts) {
+      const { score } = fit(c, said)
+      if (score > (best.get(c.name) || 0)) best.set(c.name, score)
+    }
   }
+  if (!best.size) return []
   return [...best].sort((a, b) => b[1] - a[1]).slice(0, max).map(([name]) => name)
 }
 

@@ -131,7 +131,7 @@ export const useTaskStore = create(
       // A reminder has nothing to finish, so once its day is over it is simply removed.
       dropPastReminders: () => set((s) => {
         const today = startOfToday()
-        const kept = s.tasks.filter((t) => !(isReminder(t) && t.dueDate && parseLocalDate(t.dueDate) < today))
+        const kept = s.tasks.filter((t) => !(isReminder(t) && !t.retain && t.dueDate && parseLocalDate(t.dueDate) < today))
         return kept.length === s.tasks.length ? s : { tasks: kept }
       }),
 

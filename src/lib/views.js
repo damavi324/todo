@@ -28,7 +28,7 @@ const dayLabel = (d) => d.toLocaleDateString('en-US', { weekday: 'long', month: 
 
 /**
  * The open items of a view, in labelled groups, plus its finished ones.
- * Reminders whose day has passed are left out: there is nothing left to do about them.
+ * Reminders whose day has passed are left out, except a booking you asked to keep.
  */
 export function groupView(viewId, tasks) {
   const today = startOfToday()
@@ -36,11 +36,12 @@ export function groupView(viewId, tasks) {
   const weekEnd = addDays(today, 7)
   const due = (t) => parseLocalDate(t.dueDate)
   const overdue = (t) => due(t) && due(t) < today && !isReminder(t)
+  const kept = (t) => t.retain && due(t) && due(t) < today
 
   const inView = viewId === 'today' || viewId === 'scheduled' || viewId === 'all'
     ? tasks
     : tasks.filter((t) => t.listId === viewId)
-  const open = inView.filter((t) => !t.completed && !(isReminder(t) && due(t) && due(t) < today)).sort(byDue)
+  const open = inView.filter((t) => !t.completed && !(isReminder(t) && !t.retain && due(t) && due(t) < today)).sort(byDue)
   const done = inView
     .filter((t) => t.completed)
     .sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')))
@@ -59,6 +60,7 @@ export function groupView(viewId, tasks) {
 
   if (viewId === 'scheduled') {
     const dated = open.filter((t) => due(t))
+    add('earlier', 'Earlier', dated.filter(kept))
     add('overdue', 'Overdue', dated.filter(overdue), 'danger')
     add('today', 'Today', dated.filter((t) => due(t) >= today && due(t) < tomorrow))
     add('tomorrow', 'Tomorrow', dated.filter((t) => due(t) >= tomorrow && due(t) < addDays(today, 2)))
@@ -71,6 +73,7 @@ export function groupView(viewId, tasks) {
   }
 
   add('overdue', 'Overdue', open.filter(overdue), 'danger')
+  add('earlier', 'Earlier', open.filter(kept))
   add('today', 'Today', open.filter((t) => due(t) && due(t) >= today && due(t) < tomorrow))
   add('upcoming', 'Upcoming', open.filter((t) => due(t) && due(t) >= tomorrow))
   add('someday', 'No date', open.filter((t) => !due(t)))
