@@ -58,6 +58,16 @@ export const config = {
     // Who runs the agent's Claude: 'deepgram' (managed, in Deepgram's per-minute rate) or 'anthropic' (your key,
     // billed by Anthropic). Empty = Deepgram for models it manages, your key for any other model.
     agentThinkEndpoint: (clean(e.AGENT_THINK_ENDPOINT) || '').toLowerCase(),
+    // Nepali calls: Flux has no Nepali, so the agent listens with Nova-3's Nepali model.
+    nepaliListenModel: clean(e.AGENT_LISTEN_MODEL_NE) || 'nova-3',
+  },
+  // ElevenLabs speaks Nepali calls (Deepgram has no Nepali voice). Your key; Deepgram's rate drops to "BYO TTS".
+  elevenlabs: {
+    apiKey: clean(e.ELEVENLABS_API_KEY),
+    voiceId: clean(e.ELEVENLABS_VOICE_ID_NE),
+    model: clean(e.ELEVENLABS_MODEL_NE) || 'eleven_v4_turbo',
+    // Tried if the main model fails. Slower (no live streaming), but better than silence. 'off' turns it off.
+    fallbackModel: clean(e.ELEVENLABS_FALLBACK_MODEL_NE) || 'eleven_v3',
   },
   anthropic: {
     apiKey: clean(e.ANTHROPIC_API_KEY),

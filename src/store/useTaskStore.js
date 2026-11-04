@@ -43,6 +43,8 @@ export const DEFAULT_SETTINGS = {
   // say what the other person will see and refuse to dial that same phone.
   callFrom: '',
   callFromNumber: '',
+  // The language the assistant speaks on calls by default: 'en' or 'ne' (Nepali). The call form can change it per call.
+  callLanguage: 'en',
   callSkills: DEFAULT_SKILLS,
   // Empty means the phone's best voice for its language.
   voiceName: '',

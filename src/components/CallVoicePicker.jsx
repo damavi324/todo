@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Play, Square, Loader2, Check } from 'lucide-react'
 import { useTaskStore } from '../store/useTaskStore'
 import { cp, apiUrl, ownerName, assistantName } from '../lib/callpilot'
-import { ErrorNote } from './ui'
+import { ErrorNote, Segmented } from './ui'
 
 /**
  * Settings → Calling: hear each voice the assistant can use on calls and pick one. Samples are recorded by the
@@ -23,6 +23,10 @@ export default function CallVoicePicker() {
   }, [])
 
   const chosen = settings.callVoice || list?.default || ''
+  const language = settings.callLanguage || 'en'
+  // Older servers don't list languages: English only.
+  const languages = list?.languages || []
+  const nepali = languages.find((l) => l.id === 'ne')
   const stop = () => { audio.current?.pause(); setPlaying({ id: '', state: '' }) }
   const play = (id) => {
     if (playing.id === id) return stop()
@@ -40,6 +44,16 @@ export default function CallVoicePicker() {
   if (!list) return <p className="p-4 text-xs text-ink-3 flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" />Loading voices…</p>
   return (
     <div className="p-4">
+      {nepali && (
+        <div className="mb-4">
+          <p className="text-sm text-ink">Language on calls</p>
+          <p className="text-xs text-ink-3 mt-0.5 mb-2">What the assistant speaks by default. You can change it for each call on the call screen.</p>
+          <Segmented value={language} onChange={(v) => updateSettings({ callLanguage: v })}
+            options={languages.map((l) => ({ value: l.id, label: l.label }))} />
+          {language === 'ne' && !nepali.ready && <ErrorNote tone="warn" className="mt-2">{nepali.problem}</ErrorNote>}
+          {language === 'ne' && nepali.ready && <p className="text-xs text-ink-3 mt-2">Nepali calls use the ElevenLabs voice set on the calling server. The voices below are for English calls.</p>}
+        </div>
+      )}
       <p className="text-sm text-ink">Assistant’s voice on calls</p>
       <p className="text-xs text-ink-3 mt-0.5 mb-2">Play a sample, then pick one. It sounds like a phone line, because that’s how the other person hears it.</p>
       {error && <ErrorNote tone="warn" className="mb-2">{error}</ErrorNote>}

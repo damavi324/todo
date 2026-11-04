@@ -140,22 +140,52 @@ const MODES = [
   { value: 'agent', label: 'Assistant calls', icon: <Bot size={14} /> },
   { value: 'copilot', label: 'I’ll talk', icon: <UserRound size={14} /> },
 ]
+// The language the assistant speaks on the call (Nepali needs ElevenLabs set up on the calling server).
+const LANGUAGES = [
+  { value: 'en', label: 'English' },
+  { value: 'ne', label: 'नेपाली' },
+]
+
+// The lines the server says itself, per language (server/src/language.js).
+const LINES = {
+  en: {
+    greetPersonal: (reach, owner) => `Hi, is this ${reach}? I’m calling on behalf of ${owner}.`,
+    greetReach: (reach, why, owner) => `Hi, I’m trying to reach ${reach}${why ? ` about ${why}` : ''}, on behalf of ${owner}.`,
+    greet: (why, owner) => `Hi, I’m calling on behalf of ${owner}${why ? ` about ${why}` : ''}.`,
+    aiIntro: (name, owner) => `This is ${name}, an AI assistant for ${owner}.`,
+    hasAi: (g) => /\bAI\b/.test(g),
+    transcribedMark: /transcrib/i,
+    transcribed: 'Just so you know, this call is being transcribed.',
+  },
+  ne: {
+    greetPersonal: (reach, owner) => `नमस्ते, के यो ${reach} हो? म ${owner}को तर्फबाट फोन गर्दैछु।`,
+    greetReach: (reach, why, owner) => `नमस्ते, म ${owner}को तर्फबाट ${reach}सँग कुरा गर्न खोज्दैछु${why ? `, ${why}को बारेमा` : ''}।`,
+    greet: (why, owner) => `नमस्ते, म ${owner}को तर्फबाट फोन गर्दैछु${why ? `, ${why}को बारेमा` : ''}।`,
+    aiIntro: (name, owner) => `म ${name}, ${owner}को एआई सहायक हुँ।`,
+    hasAi: (g) => /\bAI\b|एआई/.test(g),
+    transcribedMark: /transcrib|रेकर्ड/i,
+    transcribed: 'जानकारीका लागि, यो कल लिखित रूपमा रेकर्ड भइरहेको छ।',
+  },
+}
+const linesFor = (language) => LINES[language === 'ne' ? 'ne' : 'en']
 
 /** The first line the assistant says, as the server words it (server/src/streams.js greetingOf). */
-function openingLine(p) {
+function openingLine(p, language) {
   if (p.greeting) return p.greeting
-  const why = p.regarding ? ` about ${p.regarding.replace(/^(about|regarding)\s+/i, '')}` : ''
-  if (p.reach && p.kind === 'personal') return `Hi, is this ${p.reach}? I’m calling on behalf of ${ownerName()}.`
-  if (p.reach) return `Hi, I’m trying to reach ${p.reach}${why}, on behalf of ${ownerName()}.`
-  return `Hi, I’m calling on behalf of ${ownerName()}${why}.`
+  const L = linesFor(language)
+  const why = p.regarding ? p.regarding.replace(/^(about|regarding)\s+/i, '') : ''
+  if (p.reach && p.kind === 'personal') return L.greetPersonal(p.reach, ownerName())
+  if (p.reach) return L.greetReach(p.reach, why, ownerName())
+  return L.greet(why, ownerName())
 }
 
 /** The line that follows, matching the server: skipped when the opening already said it. */
-function introLine(p) {
-  const g = openingLine(p)
+function introLine(p, language) {
+  const L = linesFor(language)
+  const g = openingLine(p, language)
   const parts = []
-  if (!/\bAI\b/.test(g)) parts.push(`This is ${assistantName()}, an AI assistant for ${ownerName()}.`)
-  if (!/transcrib/i.test(g)) parts.push('Just so you know, this call is being transcribed.')
+  if (!L.hasAi(g)) parts.push(L.aiIntro(assistantName(), ownerName()))
+  if (!L.transcribedMark.test(g)) parts.push(L.transcribed)
   return parts.join(' ')
 }
 
@@ -165,6 +195,10 @@ function Compose() {
   const contacts = useTaskStore((s) => s.contacts)
   const [draft] = useState(() => useCallStore.getState().draft)
   const [mode, setMode] = useState(draft?.mode || 'agent')
+  // This call's language: picked here, or else the default from Settings (followed as it changes).
+  const defaultLanguage = useTaskStore((s) => s.settings.callLanguage || 'en')
+  const [pickedLanguage, setLanguage] = useState(draft?.language || '')
+  const language = pickedLanguage || defaultLanguage
   const [to, setTo] = useState(draft?.to ? formatNumber(draft.to) || draft.to : '')
   const [text, setText] = useState(callText(draft))
   const [busy, setBusy] = useState('')
@@ -224,7 +258,7 @@ function Compose() {
       if (handsFree) say(msg)
       return
     }
-    const body = { mode: fields.mode, to: number, goal: note, brief: note }
+    const body = { mode: fields.mode, to: number, goal: note, brief: note, language: fields.mode === 'agent' ? fields.language || language : 'en' }
     useCallStore.setState({ handsFree })
     try {
       if (fields.mode === 'agent') {
@@ -281,6 +315,12 @@ function Compose() {
               ? `${assistantName()} makes the call for you, checks with you before agreeing to anything new, and you can join anytime.`
               : 'You talk. The assistant listens, suggests what to say, and writes up the call.'}
           </p>
+          {mode === 'agent' && (
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-xs text-ink-3 px-1 flex-shrink-0">Speaks</span>
+              <div className="flex-1"><Segmented size="sm" value={language} onChange={setLanguage} options={LANGUAGES} /></div>
+            </div>
+          )}
         </div>
 
         <div className="relative">
@@ -368,8 +408,8 @@ function PlanView() {
       <h2 className="text-lg font-semibold text-ink mt-1 leading-snug">{p.objective || 'Call plan'}</h2>
       <div className="mt-4 rounded-lg bg-surface-2 px-4 py-3">
         <p className="text-xs font-medium text-ink-3">{assistantName()} opens with</p>
-        <p className="text-sm text-ink mt-1 leading-relaxed">“{openingLine(p)}”</p>
-        {introLine(p) && <p className="text-xs text-ink-3 mt-1.5">Then: “{introLine(p)}”</p>}
+        <p className="text-sm text-ink mt-1 leading-relaxed">“{openingLine(p, pending.language)}”</p>
+        {introLine(p, pending.language) && <p className="text-xs text-ink-3 mt-1.5">Then: “{introLine(p, pending.language)}”</p>}
       </div>
       {p.missing_info?.length > 0 && (
         <Note tone="warn" className="mt-4">
@@ -394,7 +434,7 @@ function PlanView() {
         <Button variant="primary" onClick={call} disabled={busy} className="flex-[2] h-11">
           {busy ? <Loader2 size={17} className="animate-spin" /> : <Phone size={17} />}Call now
         </Button>
-        <Button onClick={() => setDraft({ mode: pending.mode, to: pending.to, goal: pending.goal, brief: pending.brief })} className="flex-1 h-11">
+        <Button onClick={() => setDraft({ mode: pending.mode, to: pending.to, goal: pending.goal, brief: pending.brief, language: pending.language })} className="flex-1 h-11">
           <Pencil size={15} />Edit
         </Button>
       </div>
