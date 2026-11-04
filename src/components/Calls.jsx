@@ -537,11 +537,16 @@ function PlanView() {
       {p.likely_questions?.length > 0 && <Block title="If they ask"><Bullets items={p.likely_questions.map((x) => `${x.q} → ${x.a || 'Will ask you'}`)} /></Block>}
       {extras.length > 0 && <Block title="Also"><Bullets items={extras} /></Block>}
       <p className="text-xs text-ink-3 mt-5">A guide, not a script. {assistantName()} adapts to what they say and checks with you before anything outside it.</p>
-      {/* Always in reach while you read the plan: it stays above the tab bar (and clear of the assistant button). */}
-      <div className="sticky z-20 bottom-[calc(76px+env(safe-area-inset-bottom,0px))] md:bottom-4 -mx-5 mt-5 px-5 pr-[4.75rem] md:pr-5 py-3 bg-surface rounded-b-xl border-t border-line">
-        <Button variant="primary" onClick={call} disabled={busy || (!!pending.who?.confirm && !confirmed)} className="w-full h-12 shadow-pop">
-          {busy ? <Loader2 size={17} className="animate-spin" /> : <Phone size={17} />}Call {callWith(pending)} now
+      {/* Always in reach while you read the plan. Phones: one solid footer docked on the tab bar, with the Call
+          button and the assistant's microphone; the plan scrolls underneath it. Wider screens: sticky in the card. */}
+      <div className="fixed md:sticky inset-x-0 md:inset-x-auto z-30 bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] md:bottom-4 md:-mx-5 md:mt-5 flex items-center gap-3 px-4 md:px-5 py-3 bg-surface border-t border-line md:rounded-b-xl">
+        <Button variant="primary" onClick={call} disabled={busy || (!!pending.who?.confirm && !confirmed)} className="flex-1 h-12 min-w-0">
+          {busy ? <Loader2 size={17} className="animate-spin" /> : <Phone size={17} />}<span className="truncate">Call {callWith(pending)} now</span>
         </Button>
+        <button type="button" onClick={() => window.dispatchEvent(new Event('open-assistant'))} aria-label="Ask the assistant: speak or type"
+          className="md:hidden w-12 h-12 rounded-full bg-surface-2 flex items-center justify-center text-accent flex-shrink-0 active:scale-95 transition-transform">
+          <Mic size={20} />
+        </button>
       </div>
     </Card>
   )
