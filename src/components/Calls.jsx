@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Phone, PhoneOff, Mic, MicOff, Volume2, Grid3x3, ScrollText, ChevronLeft, Sparkles, RotateCcw, Pencil,
   ListPlus, Copy, AlertTriangle, Bot, UserRound, Loader2, CalendarPlus, Clock, Check, UserPlus, Plus, Trash2,
-  BookUser, MessageCircleQuestion, Settings, Gauge,
+  BookUser, MessageCircleQuestion, Settings, Gauge, History as HistoryIcon,
 } from 'lucide-react'
 import UsagePanel from './UsagePanel'
+import CallerIdPicker from './CallerIdPicker'
 import { useCallStore, statusText, isBadStatus, withoutContact } from '../store/useCallStore'
 import { callResult } from '../lib/callArchive'
 import { useTaskStore } from '../store/useTaskStore'
@@ -158,12 +159,6 @@ function introLine(p) {
   return parts.join(' ')
 }
 
-function TheySee() {
-  const number = useTaskStore((s) => s.settings.callFromNumber)
-  if (!number) return null
-  return <p className="text-xs text-ink-3 mt-1">The other person sees {formatNumber(number)}</p>
-}
-
 /** The form starts from the draft it was opened with (a redial, a task's call); the screen remounts it per draft. */
 function Compose() {
   const { makePlan, startCall, notify, phoneState } = useCallStore()
@@ -224,7 +219,7 @@ function Compose() {
     }
     const from = useTaskStore.getState().settings.callFromNumber
     if (samePhone(from, number)) {
-      const msg = 'That number is the one this call would show as coming from, so it would go straight to voicemail. Choose the other number in Settings → Calling, or call a different phone.'
+      const msg = 'That number is the one this call would show as coming from, so it would go straight to voicemail. Pick the other number under Call from, or call a different phone.'
       setError(msg)
       if (handsFree) say(msg)
       return
@@ -303,7 +298,7 @@ function Compose() {
             placeholder={everyone.length ? 'Search contacts, or type a number' : '(214) 555-0123'}
             enterKeyHint="next" className={`${fieldClass} w-full h-11 text-base tabular-nums scroll-mt-4`} />
           {contact && <p className="text-xs text-ink-3 mt-1.5 px-1">{contact.name}{contact.notes ? ' · their notes go with the call' : ''}</p>}
-          <TheySee />
+          <CallerIdPicker compact />
           {matches.length > 0 && (
             <div className="absolute z-10 inset-x-0 mt-1 bg-surface rounded-lg shadow-pop py-1 max-h-80 overflow-y-auto">
               {matches.map((c) => (
@@ -369,7 +364,7 @@ function PlanView() {
         </div>
       )}
       <p className="text-xs text-ink-3">Call plan · {callWith(pending)}</p>
-      <TheySee />
+      <CallerIdPicker compact />
       <h2 className="text-lg font-semibold text-ink mt-1 leading-snug">{p.objective || 'Call plan'}</h2>
       <div className="mt-4 rounded-lg bg-surface-2 px-4 py-3">
         <p className="text-xs font-medium text-ink-3">{assistantName()} opens with</p>
@@ -515,6 +510,7 @@ function ControlButton({ icon: Icon, label, active, danger, ...props }) {
 
 function ActiveCall() {
   const s = useCallStore()
+  const from = useTaskStore((st) => st.settings.callFromNumber)
   const [keypad, setKeypad] = useState(false)
   const [busy, setBusy] = useState(false)
   const session = s.session
@@ -538,7 +534,7 @@ function ActiveCall() {
         </div>
         <p className="text-2xl font-semibold tracking-tight text-ink mt-3">{callWith(session)}</p>
         {contactFor(session.to) && <p className="text-sm text-ink-3 tabular-nums">{formatNumber(session.to)}</p>}
-        <TheySee />
+        {from && <p className="text-xs text-ink-3 mt-1">The other person sees {formatNumber(from)}</p>}
         {session.goal && <p className="text-sm text-ink-2 mt-1.5 line-clamp-2">{session.goal}</p>}
         {state && <p className="mt-4 text-sm text-ink-2 flex items-center gap-2"><Bot size={15} className="text-accent" />{state}</p>}
         {!ended && (
@@ -963,6 +959,12 @@ function ServerStatus() {
   )
 }
 
+const TABS = [
+  { value: 'call', label: 'Call', icon: <Phone size={14} /> },
+  { value: 'history', label: 'History', icon: <HistoryIcon size={14} /> },
+  { value: 'contacts', label: 'Contacts', icon: <BookUser size={14} /> },
+]
+
 export default function Calls({ onOpenSettings }) {
   const { view, loadHistory, openLogs, unseenProblems, phoneState, phoneError, session, status, newCall, draftVersion } = useCallStore()
   const ready = isCallPilotReady()
@@ -974,6 +976,20 @@ export default function Calls({ onOpenSettings }) {
   useEffect(() => { if (scroller.current) scroller.current.scrollTop = 0 }, [view, draftVersion])
   const [usageOpen, setUsageOpen] = useState(false)
 
+  // Planning a call, past calls and contacts are separate tabs. A past call's details open on History;
+  // a plan, a live call, its notes or a new draft (a redial, a contact's call button) bring back the call tab.
+  const [tab, setTab] = useState(view === 'detail' ? 'history' : 'call')
+  const [seen, setSeen] = useState({ view, draftVersion })
+  if (seen.view !== view || seen.draftVersion !== draftVersion) {
+    setSeen({ view, draftVersion })
+    if (view === 'detail') setTab('history')
+    else if (view !== 'compose' || seen.draftVersion !== draftVersion) setTab('call')
+  }
+  const chooseTab = (t) => {
+    if (t === 'call' && view === 'detail') newCall()
+    setTab(t)
+  }
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <header className="safe-top flex-shrink-0">
@@ -983,7 +999,7 @@ export default function Calls({ onOpenSettings }) {
             <p className="text-sm text-ink-3 mt-1">{ready ? <ServerStatus /> : 'Not set up yet'}</p>
           </div>
           {ready && view !== 'compose' && view !== 'active' && (
-            <Button variant="primary" size="sm" onClick={newCall} className="mb-1"><Plus size={15} />New call</Button>
+            <Button variant="primary" size="sm" onClick={() => { newCall(); setTab('call') }} className="mb-1"><Plus size={15} />New call</Button>
           )}
           {ready && (
             <IconButton label="Usage & credits" onClick={() => setUsageOpen(true)} className="mb-0.5">
@@ -1028,23 +1044,17 @@ export default function Calls({ onOpenSettings }) {
                   <span className="w-2 h-2 rounded-full bg-danger animate-pulse" />Call in progress · Return to call
                 </button>
               )}
-              {view === 'compose' && <Compose key={draftVersion} />}
-              {view === 'plan' && <PlanView />}
-              {view === 'active' && <ActiveCall />}
-              {view === 'summary' && <Summary />}
-              {view === 'detail' && <Detail />}
-              {(view === 'compose' || view === 'summary') && (
-                <div className="grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-2 pt-5">
-                  <section>
-                    <h3 className="px-2 mb-1.5 text-[13px] font-semibold text-ink-2">Recent calls</h3>
-                    <RecentCalls />
-                  </section>
-                  <section>
-                    <h3 className="px-2 mb-1.5 text-[13px] font-semibold text-ink-2 flex items-center gap-1.5"><BookUser size={14} />Contacts</h3>
-                    <Contacts />
-                  </section>
-                </div>
+              {view !== 'active' && <Segmented value={tab} onChange={chooseTab} options={TABS} />}
+              {tab === 'call' && (
+                <>
+                  {view === 'compose' && <Compose key={draftVersion} />}
+                  {view === 'plan' && <PlanView />}
+                  {view === 'active' && <ActiveCall />}
+                  {view === 'summary' && <Summary />}
+                </>
               )}
+              {tab === 'history' && (view === 'detail' ? <Detail /> : <RecentCalls />)}
+              {tab === 'contacts' && <Contacts />}
             </div>
           )}
         </div>
