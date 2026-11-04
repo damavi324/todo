@@ -42,6 +42,7 @@ http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ voices: [
         { voice_id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah', labels: { description: 'soft', use_case: 'conversational', accent: 'american' } },
+        { voice_id: 'CwhRBWXzGAHq8TQ4Fs17', name: 'Roger - Laid-Back, Casual', labels: { accent: 'american' } },
         { voice_id: 'bad id!', name: 'Broken' },
       ] }));
     }
@@ -606,7 +607,10 @@ try {
   // ElevenLabs voices for English calls, and the faster thinking choice.
   r = await req('/api/voices');
   const elVoices = r.json.voices.filter((v) => v.provider === 'elevenlabs');
-  assert.deepEqual(elVoices, [{ id: 'el-EXAVITQu4vr4xnSDxMaL', label: 'Sarah, soft, conversational, american', provider: 'elevenlabs' }], 'your ElevenLabs voices are offered, bad IDs skipped');
+  assert.deepEqual(elVoices, [
+    { id: 'el-EXAVITQu4vr4xnSDxMaL', label: 'Sarah, soft, conversational, american', provider: 'elevenlabs' },
+    { id: 'el-CwhRBWXzGAHq8TQ4Fs17', label: 'Roger, Laid-Back, Casual', provider: 'elevenlabs' },
+  ], 'your ElevenLabs voices are offered, bad IDs skipped');
   assert.ok(r.json.voices.some((v) => v.id === 'flux-miles-en' && v.provider === 'deepgram'), 'Deepgram voices stay');
   assert.equal(r.json.default, 'flux-miles-en', 'without ELEVENLABS_VOICE_ID_EN the Deepgram voice stays the default');
   assert.deepEqual(r.json.thinking, { smart: 'claude-sonnet-5-5', fast: 'claude-haiku-4-5', ready: true });

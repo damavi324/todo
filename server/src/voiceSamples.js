@@ -52,7 +52,11 @@ export async function elevenLabsVoices() {
     const words = (l = {}) => [l.description, l.use_case, l.accent].filter(Boolean).map((x) => String(x).replace(/_/g, ' ')).join(', ');
     const list = voices
       .filter((v) => /^[A-Za-z0-9]{8,40}$/.test(v.voice_id || ''))
-      .map((v) => ({ id: EL_PREFIX + v.voice_id, label: [v.name, words(v.labels)].filter(Boolean).join(', '), provider: 'elevenlabs' }))
+      .map((v) => {
+        // Built-in voices are named like "Roger - Laid-Back, Casual, Resonant": the name, then how it sounds.
+        const [name, ...about] = String(v.name || 'Voice').split(' - ');
+        return { id: EL_PREFIX + v.voice_id, label: [name.trim(), about.join(' - ').trim() || words(v.labels)].filter(Boolean).join(', '), provider: 'elevenlabs' };
+      })
       .slice(0, 40);
     elevenList = { at: Date.now(), voices: list };
   } catch (err) {
