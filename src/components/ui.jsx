@@ -1,6 +1,6 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X } from 'lucide-react'
+import { X, ChevronLeft } from 'lucide-react'
 import { useBack } from '../lib/backStack'
 
 const BUTTON = {
@@ -37,9 +37,9 @@ export function IconButton({ label, className = '', children, ...props }) {
 
 /**
  * A panel over the app: a bottom sheet on phones, and on wider screens either a drawer on the right
- * (`side`) or a centered dialog.
+ * (`side`) or a centered dialog. With `onBack`, the top bar shows a back arrow (for a page inside the sheet).
  */
-export function Sheet({ title, onClose, children, footer, side = false, wide = false }) {
+export function Sheet({ title, onClose, onBack, children, footer, side = false, wide = false }) {
   useBack(onClose)
   const { panel, drag } = useSwipeDown(onClose)
 
@@ -57,7 +57,14 @@ export function Sheet({ title, onClose, children, footer, side = false, wide = f
         {/* Phones: drag the top bar down to close, like any bottom sheet. */}
         <div {...drag} className="relative flex items-center justify-between gap-3 px-5 h-14 border-b border-line flex-shrink-0 touch-none md:touch-auto">
           <span className="md:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-9 h-1 rounded-full bg-line" aria-hidden />
-          <h2 className="text-[15px] font-semibold text-ink truncate">{title}</h2>
+          <div className="flex items-center gap-1 min-w-0">
+            {onBack && (
+              <IconButton label="Back" onClick={onBack} className="-ml-2">
+                <ChevronLeft size={20} />
+              </IconButton>
+            )}
+            <h2 className="text-[15px] font-semibold text-ink truncate">{title}</h2>
+          </div>
           <IconButton label="Close" onClick={onClose} className="-mr-2">
             <X size={18} />
           </IconButton>
@@ -143,14 +150,53 @@ export function Switch({ checked, onChange, disabled, label }) {
 }
 
 /** A callout inside a form: tone is 'info' | 'warn' | 'danger' | 'success'. */
+const NOTE_TONES = {
+  info: 'bg-surface-2 text-ink-2',
+  warn: 'bg-warn/10 text-warn',
+  danger: 'bg-danger/10 text-danger',
+  success: 'bg-success/10 text-success',
+}
+
 export function Note({ tone = 'info', children, className = '' }) {
-  const tones = {
-    info: 'bg-surface-2 text-ink-2',
-    warn: 'bg-warn/10 text-warn',
-    danger: 'bg-danger/10 text-danger',
-    success: 'bg-success/10 text-success',
-  }
-  return <p className={`text-[13px] leading-relaxed rounded-lg px-3 py-2.5 ${tones[tone]} ${className}`}>{children}</p>
+  return <p className={`text-[13px] leading-relaxed rounded-lg px-3 py-2.5 ${NOTE_TONES[tone]} ${className}`}>{children}</p>
+}
+
+/**
+ * A problem in one short line, with the full text behind "Details" (selectable, so it can be copied).
+ * Pass `summary` for the short line, or just the message and its first sentence is used.
+ */
+export function ErrorNote({ tone = 'danger', summary, children, className = '' }) {
+  const [open, setOpen] = useState(false)
+  const text = typeof children === 'string' ? children.trim() : ''
+  const short = summary || shortMessage(text)
+  const hasMore = typeof children === 'string' ? short !== text : !!children
+  return (
+    <div className={`text-[13px] leading-relaxed rounded-lg px-3 py-2.5 ${NOTE_TONES[tone]} ${className}`}>
+      <p className="break-words">{short}</p>
+      {hasMore && (
+        <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-xs font-medium underline underline-offset-2 opacity-80 hover:opacity-100">
+          {open ? 'Hide details' : 'Details'}
+        </button>
+      )}
+      {open && <div className="mt-1.5 text-xs whitespace-pre-line break-words select-text opacity-90">{children}</div>}
+    </div>
+  )
+}
+
+function shortMessage(text) {
+  const line = text.split('\n')[0].trim()
+  const sentence = line.match(/^.{12,}?[.!?](?=\s|$)/)?.[0] || line
+  return sentence.length > 120 ? `${sentence.slice(0, 110).trimEnd()}…` : sentence
+}
+
+/** A titled group of settings: a bordered card whose rows are divided by lines. */
+export function Section({ title, children }) {
+  return (
+    <section>
+      {title && <h3 className="px-1 mb-2 text-[13px] font-semibold text-ink-2">{title}</h3>}
+      <div className="bg-surface rounded-xl border border-line divide-y divide-line overflow-hidden">{children}</div>
+    </section>
+  )
 }
 
 export const fieldClass =

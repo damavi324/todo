@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Loader2, Check } from 'lucide-react'
 import { useTaskStore } from '../store/useTaskStore'
 import { formatNumber, rememberCallerId } from '../lib/callpilot'
-import { Note } from './ui'
+import { ErrorNote } from './ui'
 
 /**
  * Settings → Calling: which number calls show as coming from. The numbers themselves are set on the calling
@@ -19,13 +19,13 @@ export default function CallerIdPicker() {
       .then(setList, (e) => setError(e.status === 404 ? 'Your calling server needs the latest update to pick a caller ID.' : e.message))
   }, [])
 
-  if (error) return <div className="px-4 pb-4"><Note tone="warn">{error}</Note></div>
-  if (!list) return <p className="px-4 pb-4 text-xs text-ink-3 flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" />Loading numbers…</p>
+  if (error) return <div className="p-4"><ErrorNote tone="warn">{error}</ErrorNote></div>
+  if (!list) return <p className="p-4 text-xs text-ink-3 flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" />Loading numbers…</p>
   if (list.numbers.length < 2) return null
   const chosen = list.numbers.some((n) => n.key === settings.callFrom) ? settings.callFrom : list.default
   const choose = (n) => updateSettings({ callFrom: n.key, callFromNumber: n.number })
   return (
-    <div className="px-4 pb-4">
+    <div className="p-4">
       <p className="text-sm text-ink">Calls come from</p>
       <p className="text-xs text-ink-3 mt-0.5 mb-2">The number the other person sees. Changes apply to your next call.</p>
       <ul className="rounded-xl border border-line divide-y divide-line overflow-hidden">

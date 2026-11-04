@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Play, Square, Loader2, Check } from 'lucide-react'
 import { useTaskStore } from '../store/useTaskStore'
 import { cp, apiUrl, ownerName, assistantName } from '../lib/callpilot'
-import { Note } from './ui'
+import { ErrorNote } from './ui'
 
 /**
  * Settings → Calling: hear each voice the assistant can use on calls and pick one. Samples are recorded by the
@@ -36,13 +36,13 @@ export default function CallVoicePicker() {
     a.play().catch(() => {})
   }
 
-  if (error && !list) return <div className="px-4 pb-4"><Note tone="warn">{error}</Note></div>
-  if (!list) return <p className="px-4 pb-4 text-xs text-ink-3 flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" />Loading voices…</p>
+  if (error && !list) return <div className="p-4"><ErrorNote tone="warn">{error}</ErrorNote></div>
+  if (!list) return <p className="p-4 text-xs text-ink-3 flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" />Loading voices…</p>
   return (
-    <div className="px-4 pb-4">
+    <div className="p-4">
       <p className="text-sm text-ink">Assistant’s voice on calls</p>
       <p className="text-xs text-ink-3 mt-0.5 mb-2">Play a sample, then pick one. It sounds like a phone line, because that’s how the other person hears it.</p>
-      {error && <Note tone="warn" className="mb-2">{error}</Note>}
+      {error && <ErrorNote tone="warn" className="mb-2">{error}</ErrorNote>}
       <ul className="rounded-xl border border-line divide-y divide-line overflow-hidden">
         {list.voices.map((v) => {
           const [name, ...rest] = v.label.replace(/^Flux /, '').split(', ')
