@@ -182,7 +182,7 @@ function listenInstead(s) {
  */
 export function thinkModelOf(s) {
   const d = config.deepgram;
-  if (s.thinking === 'fast') return d.agentFastThinkModel;
+  if (s.thinking === 'fast' || s._thinkFallback) return d.agentFastThinkModel;
   if (thinkUsesOwnKey(d) && !config.anthropic.apiKey) return d.agentFastThinkModel;
   return d.agentThinkModel;
 }
@@ -355,7 +355,8 @@ export function handleAgentStream(twilioWs) {
   }
 
   function connectAgent() {
-    agentWs = openVoiceAgent();
+    const ws = openVoiceAgent();
+    agentWs = ws;
     agentWs.on('open', () => {
       sendAgent(agentSettings(session));
       keepAlive = setInterval(() => sendAgent({ type: 'KeepAlive' }), 8000);
@@ -408,6 +409,17 @@ export function handleAgentStream(twilioWs) {
           break;
         case 'Error':
           console.error('[agent] Deepgram error:', JSON.stringify(msg));
+          // The smarter model on our own key was refused before the agent went live: reconnect with the faster
+          // model Deepgram runs itself, so the person who answered hears the assistant instead of silence.
+          if (!ready && !session._thinkFallback && thinkModelOf(session) !== config.deepgram.agentFastThinkModel) {
+            session._thinkFallback = true;
+            log(`[agent] ${thinkModelOf({ ...session, _thinkFallback: false })} refused; reconnecting with ${config.deepgram.agentFastThinkModel}`);
+            ws.removeAllListeners('close');
+            clearInterval(keepAlive);
+            try { ws.close(); } catch {}
+            connectAgent();
+            break;
+          }
           emit(session, 'notice', { level: 'error', message: `Agent error: ${msg.description || msg.message || JSON.stringify(msg)}` });
           break;
         case 'Warning':

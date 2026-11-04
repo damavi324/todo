@@ -125,7 +125,8 @@ export function thinkConfig(override = {}) {
   if (thinkUsesOwnKey(d)) {
     think.endpoint = {
       url: `${config.anthropic.baseUrl}/v1/messages`,
-      headers: { 'x-api-key': config.anthropic.apiKey, 'anthropic-version': '2023-06-01' },
+      // Deepgram adds anthropic-version itself and refuses settings that set it.
+      headers: { 'x-api-key': config.anthropic.apiKey },
     };
   }
   return think;

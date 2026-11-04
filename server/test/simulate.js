@@ -133,6 +133,16 @@ agentServer.on('connection', (ws, req) => {
     const msg = JSON.parse(data.toString());
     if (msg.type === 'Settings') {
       agentLog.settings = msg;
+      (agentLog.allSettings ||= []).push(msg);
+      const endpoint = msg.agent?.think?.endpoint;
+      // Like the real Deepgram: refuses a custom think endpoint that sets anthropic-version.
+      if (endpoint?.headers?.['anthropic-version']) {
+        return ws.send(JSON.stringify({ type: 'Error', description: 'Custom think endpoint cannot contain anthropic-version header', code: 'INVALID_SETTINGS' }));
+      }
+      // A refusal of our own-key model, to test the switch to the faster model.
+      if (endpoint && /REFUSE-THINK/.test(msg.agent.think.prompt)) {
+        return ws.send(JSON.stringify({ type: 'Error', description: 'think provider unavailable', code: 'INVALID_SETTINGS' }));
+      }
       ws.send(JSON.stringify({ type: 'SettingsApplied' }));
     } else if (msg.type === 'KeepAlive') agentLog.keepAlives++;
     else if (msg.type === 'InjectAgentMessage') {
@@ -428,6 +438,7 @@ try {
   assert.match(st.agent.think.prompt, /Do not ask "what's your name\?"/);
   assert.deepEqual(st.agent.think.provider, { type: 'anthropic', model: 'claude-sonnet-5-5' }, 'calls think with Sonnet 5.5 by default');
   assert.equal(st.agent.think.endpoint.url, `http://localhost:${PORTS.claude}/v1/messages`, 'Sonnet 5.5 runs on our own Anthropic key');
+  assert.deepEqual(Object.keys(st.agent.think.endpoint.headers), ['x-api-key'], 'no anthropic-version header (Deepgram refuses it)');
   assert.deepEqual(st.agent.think.functions.map((f) => f.name), ['ask_owner', 'press_digits', 'finish_call']);
   assert.ok(st.agent.think.functions.every((f) => f.defer_until_eot), 'tools wait for the end of their turn');
   assert.equal(st.agent.greeting, undefined, 'no greeting over their "Hello?"');
@@ -653,6 +664,22 @@ try {
   r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550184', goal: 'x', voice: 'el-../../etc' } });
   assert.equal(r.json.session.voice, '', 'a malformed voice ID is ignored');
   pass('English calls: ElevenLabs voices from your library (preview and call), Sonnet 5.5 thinking with Haiku as the faster choice');
+
+  // Deepgram refuses the smarter model before the agent is live: the call reconnects with the faster one.
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550183', goal: 'REFUSE-THINK test call' } });
+  const agRf = r.json.session;
+  const twRf = new WebSocket(`ws://localhost:${PORTS.app}/streams/agent`);
+  await new Promise((res) => twRf.on('open', res));
+  agentLog.allSettings = [];
+  twRf.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_RF', callSid: agRf.callSid, customParameters: { sessionId: agRf.id } } }));
+  await waitFor(() => agentLog.allSettings.length >= 2, 'a second try with the faster model');
+  assert.deepEqual(agentLog.allSettings.map((x) => x.agent.think.provider.model), ['claude-sonnet-5-5', 'claude-haiku-4-5']);
+  assert.equal(agentLog.allSettings[1].agent.think.endpoint, undefined, 'the faster model runs on Deepgram');
+  await sleep(300);
+  r = await req(`/api/sessions/${agRf.id}`);
+  assert.equal(r.json.call.status, 'live', 'the call goes live on the faster model');
+  twRf.close();
+  pass('If Deepgram refuses the smarter model, the call switches to the faster one instead of going silent');
 
   process.env.CALLPILOT_ENV_FILE = envFile; // so importing the config below reads no real .env
   const { config: cfg } = await import('../src/config.js');
