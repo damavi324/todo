@@ -1,11 +1,11 @@
 import WebSocket from 'ws';
 import { config, publicWss } from './config.js';
-import { openLiveTranscriber, openVoiceAgent, listenProvider, speakConfig, thinkConfig, nepaliListenProvider, elevenLabsSpeak } from './deepgram.js';
+import { openLiveTranscriber, openVoiceAgent, listenProvider, speakConfig, thinkConfig, thinkUsesOwnKey, nepaliListenProvider, elevenLabsSpeak } from './deepgram.js';
 import { lines, languagePrompt } from './language.js';
 import { hangupCall, updateCall, twiml, streamParams, xml } from './twilio.js';
 import { dtmfMulaw, frames } from './dtmf.js';
 import { planToPrompt } from './planner.js';
-import { voiceById } from './voiceSamples.js';
+import { voiceById, defaultVoiceId } from './voiceSamples.js';
 import {
   getSession, setStatus, addLine, emit, utteranceAssembler, askOwner, finalize, markVoicemail,
 } from './sessions.js';
@@ -176,6 +176,17 @@ function listenInstead(s) {
   return `${fix}\n\n${now}`;
 }
 
+/**
+ * The Claude model that thinks on this call: the smarter one, unless the app asked for fast or the smarter one
+ * needs your Anthropic key and the server has none.
+ */
+export function thinkModelOf(s) {
+  const d = config.deepgram;
+  if (s.thinking === 'fast') return d.agentFastThinkModel;
+  if (thinkUsesOwnKey(d) && !config.anthropic.apiKey) return d.agentFastThinkModel;
+  return d.agentThinkModel;
+}
+
 function agentSettings(s) {
   const d = config.deepgram;
   const nepali = s.language === 'ne';
@@ -190,7 +201,7 @@ function agentSettings(s) {
       ...(nepali ? {} : { language: 'en' }),
       listen: { provider: nepali ? nepaliListenProvider() : listenProvider(d.agentListenModel) },
       think: {
-        ...thinkConfig(),
+        ...thinkConfig({ agentThinkModel: thinkModelOf(s) }),
         prompt: agentPrompt(s),
         functions: [
           {
@@ -229,7 +240,7 @@ function agentSettings(s) {
         ],
       },
       // No greeting: the first line is spoken after they say hello (see the prompt and the hello timer).
-      speak: nepali ? elevenLabsSpeak() : speakConfig(voiceById(s.voice)?.o),
+      speak: nepali ? elevenLabsSpeak() : speakConfig(voiceById(s.voice || defaultVoiceId())?.o),
     },
   };
 }

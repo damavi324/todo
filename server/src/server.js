@@ -14,11 +14,11 @@ import {
 import { handleListenStream, handleAgentStream, joinAgentCall } from './streams.js';
 import { generatePlan, normalizePlan, cleanSkills } from './planner.js';
 import { accountUsage } from './usage.js';
-import { VOICES, voiceById, voiceSample } from './voiceSamples.js';
+import { VOICES, voiceById, voiceSample, elevenLabsVoices, defaultVoiceId } from './voiceSamples.js';
 import { interpret, parseTask } from './assistant.js';
 import { LANGUAGES, cleanLanguage, languageProblem } from './language.js';
 import { ensureTwimlApp, validTwilioSignature } from './twilio.js';
-import { openLiveTranscriber } from './deepgram.js';
+import { openLiveTranscriber, thinkUsesOwnKey } from './deepgram.js';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const publicDir = path.join(config.root, 'public');
@@ -259,13 +259,15 @@ async function route(req, res) {
   if (p.startsWith('/api/') && !isAuthed(req)) return send(res, 401, { error: 'Login required' });
   if (p === '/api/voices' && method === 'GET') {
     return send(res, 200, {
-      voices: VOICES.map(({ id, label }) => ({ id, label })),
-      default: config.deepgram.agentVoice,
+      voices: [...VOICES.map(({ id, label }) => ({ id, label, provider: 'deepgram' })), ...await elevenLabsVoices()],
+      default: defaultVoiceId(),
+      // How the agent thinks on calls: the app picks 'smart' (better reasoning) or 'fast'.
+      thinking: { smart: config.deepgram.agentThinkModel, fast: config.deepgram.agentFastThinkModel, ready: !!config.anthropic.apiKey || !thinkUsesOwnKey() },
       // Languages the agent can call in; ready is false (with why) when the server is missing what one needs.
       languages: LANGUAGES.map(({ id, label }) => ({ id, label, ready: !languageProblem(id), problem: languageProblem(id) })),
     });
   }
-  const vm = p.match(/^\/api\/voices\/([a-z0-9-]+)\/sample$/);
+  const vm = p.match(/^\/api\/voices\/([A-Za-z0-9-]+)\/sample$/);
   if (vm && method === 'GET') {
     const voice = voiceById(vm[1]);
     if (!voice) return send(res, 404, { error: 'Unknown voice' });
@@ -372,7 +374,7 @@ async function route(req, res) {
     // Only the AI agent speaks a language; a call you make yourself is always transcribed in English.
     const language = mode === 'agent' ? cleanLanguage(body.language) : 'en';
     if (languageProblem(language)) return send(res, 400, { error: languageProblem(language) });
-    const s = createSession({ mode, to, from, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', assistant: body.assistant, language });
+    const s = createSession({ mode, to, from, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', assistant: body.assistant, language, thinking: body.thinking });
     if (mode === 'agent') {
       logCallerId(s, to);
       try {

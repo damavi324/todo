@@ -34,6 +34,7 @@ const SHARED_SETTINGS = [
   'callFrom',
   'callFromNumber',
   'callLanguage',
+  'callThinking',
   'googleCalendarId',
   'callpilotUrl',
   'callpilotToken',

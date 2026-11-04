@@ -17,7 +17,63 @@ export const CANDIDATES = [
 
 /** Voices the app can offer: id, label and the settings that select it. */
 export const VOICES = CANDIDATES.filter((c) => !c.only).map((c) => ({ id: c.o.agentVoice, label: c.label.replace(/ \((current|previous) default\)$/, ''), o: c.o }));
-export const voiceById = (id) => VOICES.find((v) => v.id === id) || null;
+
+// ElevenLabs voices are "el-" + the ElevenLabs voice ID, so any voice in your ElevenLabs library can be picked.
+const EL_PREFIX = 'el-';
+const elevenVoice = (id) => {
+  const voiceId = String(id || '').slice(EL_PREFIX.length);
+  return { id, label: 'ElevenLabs voice', provider: 'elevenlabs', o: { agentTts: 'elevenlabs', elevenVoice: voiceId, agentVoice: 'flux-miles-en' } };
+};
+const isElevenId = (id) => String(id || '').startsWith(EL_PREFIX) && /^[A-Za-z0-9]{8,40}$/.test(String(id).slice(EL_PREFIX.length));
+
+export const voiceById = (id) => {
+  if (isElevenId(id)) return config.elevenlabs.apiKey ? elevenVoice(id) : null;
+  return VOICES.find((v) => v.id === id) || null;
+};
+
+/** The voice calls use when the app hasn't picked one: the English ElevenLabs voice if set, else the Deepgram one. */
+export const defaultVoiceId = () => (config.elevenlabs.apiKey && config.elevenlabs.voiceIdEn
+  ? EL_PREFIX + config.elevenlabs.voiceIdEn
+  : config.deepgram.agentVoice);
+
+let elevenList = { at: 0, voices: [] };
+/**
+ * The voices in your ElevenLabs library (its ready-made ones plus any you added), for the app to offer on
+ * English calls. Read from ElevenLabs at most every 10 minutes; empty without a key or if ElevenLabs can't be reached.
+ */
+export async function elevenLabsVoices() {
+  const el = config.elevenlabs;
+  if (!el.apiKey) return [];
+  if (Date.now() - elevenList.at < 10 * 60 * 1000) return elevenList.voices;
+  try {
+    const r = await fetch(`${el.apiBase}/v1/voices`, { headers: { 'xi-api-key': el.apiKey }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error(`ElevenLabs answered ${r.status}`);
+    const { voices = [] } = await r.json();
+    const words = (l = {}) => [l.description, l.use_case, l.accent].filter(Boolean).map((x) => String(x).replace(/_/g, ' ')).join(', ');
+    const list = voices
+      .filter((v) => /^[A-Za-z0-9]{8,40}$/.test(v.voice_id || ''))
+      .map((v) => ({ id: EL_PREFIX + v.voice_id, label: [v.name, words(v.labels)].filter(Boolean).join(', '), provider: 'elevenlabs' }))
+      .slice(0, 40);
+    elevenList = { at: Date.now(), voices: list };
+  } catch (err) {
+    console.warn('[voices] ElevenLabs voices unavailable:', err.message);
+    elevenList = { at: Date.now() - 9 * 60 * 1000, voices: elevenList.voices }; // try again in a minute
+  }
+  return elevenList.voices;
+}
+
+/** An ElevenLabs voice saying `line`, as phone-quality audio (8 kHz mu-law, like a real call). */
+async function elevenSample(voiceId, line) {
+  const el = config.elevenlabs;
+  const r = await fetch(`${el.apiBase}/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=ulaw_8000`, {
+    method: 'POST',
+    headers: { 'xi-api-key': el.apiKey, 'Content-Type': 'application/json', Accept: 'audio/basic' },
+    body: JSON.stringify({ text: line, model_id: el.modelEn }),
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!r.ok) throw new Error(`ElevenLabs answered ${r.status}`);
+  return { audio: Buffer.from(await r.arrayBuffer()), error: null };
+}
 
 export function mulawToPcm16(buf) {
   const out = Buffer.alloc(buf.length * 2);
@@ -60,7 +116,8 @@ export function audition(c, line) {
         agent: {
           language: 'en',
           listen: { provider: listenProvider(config.deepgram.agentListenModel) },
-          think: { provider: { type: 'anthropic', model: config.deepgram.agentThinkModel }, prompt: 'Stay silent.' },
+          // A model Deepgram runs itself: the sample only speaks its greeting, so no thinking is needed.
+          think: { provider: { type: 'anthropic', model: config.deepgram.agentFastThinkModel }, prompt: 'Stay silent.' },
           speak,
           greeting: line,
         },
@@ -85,7 +142,8 @@ const samples = new Map();
 export async function voiceSample(voice, line) {
   const key = `${voice.id}|${line}`;
   if (!samples.has(key)) {
-    const p = audition({ o: voice.o }, line).then(({ audio, error }) => {
+    const recorded = voice.provider === 'elevenlabs' ? elevenSample(voice.o.elevenVoice, line) : audition({ o: voice.o }, line);
+    const p = recorded.then(({ audio, error }) => {
       if (error || audio.length < 1600) throw new Error(error || 'No audio came back');
       return wav(mulawToPcm16(audio));
     });

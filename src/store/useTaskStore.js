@@ -45,6 +45,8 @@ export const DEFAULT_SETTINGS = {
   callFromNumber: '',
   // The language the assistant speaks on calls by default: 'en' or 'ne' (Nepali). The call form can change it per call.
   callLanguage: 'en',
+  // How the assistant thinks on calls: 'smart' (Claude Sonnet, better reasoning) or 'fast' (Claude Haiku, quicker).
+  callThinking: 'smart',
   callSkills: DEFAULT_SKILLS,
   // Empty means the phone's best voice for its language.
   voiceName: '',

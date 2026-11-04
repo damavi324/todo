@@ -137,18 +137,18 @@ export function nepaliListenProvider() {
 }
 
 /**
- * The agent's voice on a Nepali call: ElevenLabs over its streaming socket, with an optional slower
- * model over HTTPS as a fallback (Deepgram tries the next entry if one fails).
+ * The agent's voice through ElevenLabs over its streaming socket, with an optional slower model over HTTPS as a
+ * fallback (Deepgram tries the next entry if one fails). Nepali calls by default; English calls pass their voice.
  */
-export function elevenLabsSpeak(el = config.elevenlabs) {
+export function elevenLabsSpeak(el = config.elevenlabs, { voiceId = el.voiceId, language = 'ne', model = el.model } = {}) {
   const headers = { 'xi-api-key': el.apiKey };
-  const base = `api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(el.voiceId)}`;
+  const base = `api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`;
   const out = [{
-    provider: { type: 'eleven_labs', model_id: el.model, language_code: 'ne' },
+    provider: { type: 'eleven_labs', model_id: model, language_code: language },
     endpoint: { url: `wss://${base}/multi-stream-input`, headers },
   }];
-  if (el.fallbackModel && el.fallbackModel !== 'off' && el.fallbackModel !== el.model) {
-    out.push({ provider: { type: 'eleven_labs', model_id: el.fallbackModel, language_code: 'ne' }, endpoint: { url: `https://${base}`, headers } });
+  if (el.fallbackModel && el.fallbackModel !== 'off' && el.fallbackModel !== model) {
+    out.push({ provider: { type: 'eleven_labs', model_id: el.fallbackModel, language_code: language }, endpoint: { url: `https://${base}`, headers } });
   }
   return out.length === 1 ? out[0] : out;
 }
@@ -169,6 +169,11 @@ export function speakConfig(override = {}) {
     },
   };
   const tts = d.agentTts || (voice.startsWith('aura') ? 'aura' : 'flux');
+  if (tts === 'elevenlabs') {
+    // An ElevenLabs voice; Flux Miles takes over if ElevenLabs fails, so the call never goes silent.
+    const el = elevenLabsSpeak(config.elevenlabs, { voiceId: d.elevenVoice, language: 'en', model: config.elevenlabs.modelEn });
+    return [...(Array.isArray(el) ? el : [el]), flux];
+  }
   if (tts === 'cartesia') {
     return [
       { provider: { type: 'cartesia', model_id: d.cartesiaModel, voice: { mode: 'id', id: d.cartesiaVoice } } },

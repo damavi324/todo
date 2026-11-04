@@ -171,6 +171,8 @@ export function callerContext() {
     from: s.callFrom || '',
     // The call form sends its own choice; this is the default from Settings.
     language: s.callLanguage || 'en',
+    // How the assistant thinks on calls: 'smart' (better reasoning) or 'fast' (quicker replies).
+    thinking: s.callThinking || 'smart',
     skills: s.useSkills === false ? [] : (s.callSkills || []).filter((x) => x.on && x.text?.trim()).map((x) => x.text.trim()),
     // So the call notes can turn "next Tuesday at 9" into a real date.
     localNow: `${now.toLocaleDateString('en-US', { weekday: 'long' })} ${toLocalYMD(now)} ${toLocalHM(now)} ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,

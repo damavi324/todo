@@ -54,20 +54,28 @@ export const config = {
     agentExpressivity: clean(e.AGENT_EXPRESSIVITY),
     cartesiaModel: clean(e.CARTESIA_MODEL) || 'sonic-2',
     cartesiaVoice: clean(e.CARTESIA_VOICE_ID) || 'a167e0f3-df7e-4d52-a9c3-f949145efdab',
-    agentThinkModel: clean(e.AGENT_THINK_MODEL) || 'claude-haiku-4-5',
+    // The agent's mind on a live call. Sonnet 5.5 reasons best at a speed that suits a phone call; it runs on your
+    // Anthropic key. The app can pick the faster model instead (Settings → Calling), which Deepgram runs itself.
+    agentThinkModel: clean(e.AGENT_THINK_MODEL) || 'claude-sonnet-5-5',
+    agentFastThinkModel: clean(e.AGENT_FAST_THINK_MODEL) || 'claude-haiku-4-5',
     // Who runs the agent's Claude: 'deepgram' (managed, in Deepgram's per-minute rate) or 'anthropic' (your key,
     // billed by Anthropic). Empty = Deepgram for models it manages, your key for any other model.
     agentThinkEndpoint: (clean(e.AGENT_THINK_ENDPOINT) || '').toLowerCase(),
     // Nepali calls: Flux has no Nepali, so the agent listens with Nova-3's Nepali model.
     nepaliListenModel: clean(e.AGENT_LISTEN_MODEL_NE) || 'nova-3',
   },
-  // ElevenLabs speaks Nepali calls (Deepgram has no Nepali voice). Your key; Deepgram's rate drops to "BYO TTS".
+  // ElevenLabs speaks Nepali calls (Deepgram has no Nepali voice), and English calls when an ElevenLabs voice is
+  // picked. Your key; Deepgram's rate drops to "BYO TTS".
   elevenlabs: {
     apiKey: clean(e.ELEVENLABS_API_KEY),
+    apiBase: (clean(e.ELEVENLABS_API_BASE) || 'https://api.elevenlabs.io').replace(/\/+$/, ''),
     voiceId: clean(e.ELEVENLABS_VOICE_ID_NE),
     model: clean(e.ELEVENLABS_MODEL_NE) || 'eleven_v4_turbo',
     // Tried if the main model fails. Slower (no live streaming), but better than silence. 'off' turns it off.
     fallbackModel: clean(e.ELEVENLABS_FALLBACK_MODEL_NE) || 'eleven_v3',
+    // English calls: the default ElevenLabs voice (empty = a Deepgram voice stays the default) and its model.
+    voiceIdEn: clean(e.ELEVENLABS_VOICE_ID_EN),
+    modelEn: clean(e.ELEVENLABS_MODEL_EN) || 'eleven_v4_turbo',
   },
   anthropic: {
     apiKey: clean(e.ANTHROPIC_API_KEY),

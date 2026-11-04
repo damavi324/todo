@@ -118,7 +118,7 @@ export function slog(s, level, text) {
   persist(s);
 }
 
-export function createSession({ mode, to, from, goal, brief, plan, owner, about, localNow, skills = [], planUsage, voice = '', assistant = '', language = 'en' }) {
+export function createSession({ mode, to, from, goal, brief, plan, owner, about, localNow, skills = [], planUsage, voice = '', assistant = '', language = 'en', thinking = '' }) {
   const s = {
     id: crypto.randomUUID(),
     mode, // 'copilot' | 'agent'
@@ -135,6 +135,7 @@ export function createSession({ mode, to, from, goal, brief, plan, owner, about,
     skills,
     assistantName: assistantNameOf(assistant), // what the assistant calls itself on this call
     voice, // the voice picked in the app for this call; empty = the server's default
+    thinking: thinking === 'fast' ? 'fast' : 'smart', // how the agent thinks: 'smart' (better reasoning) or 'fast'
     language, // what the agent speaks on the call: 'en' or 'ne' (Nepali)
     // What this call used: Claude tokens per model (call plan, live tips, notes) and how long it lasted.
     usage: { claude: cleanUsage(planUsage), seconds: 0 },

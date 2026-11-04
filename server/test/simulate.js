@@ -13,7 +13,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PORTS = { app: 5591, stt: 5592, agent: 5593, claude: 5594, twilio: 5595 };
+const PORTS = { app: 5591, stt: 5592, agent: 5593, claude: 5594, twilio: 5595, eleven: 5596 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
 const pass = (m) => { results.push(m); console.log('  ✔', m); };
@@ -32,6 +32,26 @@ const twilioServer = http.createServer((req, res) => {
     res.end(JSON.stringify({ sid, status: 'queued' }));
   });
 }).listen(PORTS.twilio);
+const elevenCalls = [];
+http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => (body += c));
+  req.on('end', () => {
+    elevenCalls.push({ url: req.url, key: req.headers['xi-api-key'], body });
+    if (req.url === '/v1/voices') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ voices: [
+        { voice_id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah', labels: { description: 'soft', use_case: 'conversational', accent: 'american' } },
+        { voice_id: 'bad id!', name: 'Broken' },
+      ] }));
+    }
+    if (req.url.startsWith('/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL?output_format=ulaw_8000')) {
+      res.writeHead(200, { 'Content-Type': 'audio/basic' });
+      return res.end(Buffer.alloc(4000, 0x7f));
+    }
+    res.writeHead(404); res.end();
+  });
+}).listen(PORTS.eleven);
 
 const claudeRequests = [];
 const claudeServer = http.createServer((req, res) => {
@@ -152,6 +172,7 @@ const env = {
   ANTHROPIC_BASE_URL: `http://localhost:${PORTS.claude}`,
   ELEVENLABS_API_KEY: 'xi_test',
   ELEVENLABS_VOICE_ID_NE: 'voice_ne',
+  ELEVENLABS_API_BASE: `http://localhost:${PORTS.eleven}`,
 };
 const app = spawn(process.execPath, ['src/server.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let appOut = '';
@@ -390,8 +411,8 @@ try {
   assert.deepEqual(st.agent.speak.provider, { type: 'deepgram', version: 'v2', model: 'flux-miles-en', speed: 1, expressivity: 0 });
   assert.match(st.agent.think.prompt, /usually one sentence, at most two/);
   assert.match(st.agent.think.prompt, /Do not ask "what's your name\?"/);
-  assert.deepEqual(st.agent.think.provider, { type: 'anthropic', model: 'claude-haiku-4-5' });
-  assert.equal(st.agent.think.endpoint, undefined, 'managed model: no Anthropic key sent to Deepgram');
+  assert.deepEqual(st.agent.think.provider, { type: 'anthropic', model: 'claude-sonnet-5-5' }, 'calls think with Sonnet 5.5 by default');
+  assert.equal(st.agent.think.endpoint.url, `http://localhost:${PORTS.claude}/v1/messages`, 'Sonnet 5.5 runs on our own Anthropic key');
   assert.deepEqual(st.agent.think.functions.map((f) => f.name), ['ask_owner', 'press_digits', 'finish_call']);
   assert.ok(st.agent.think.functions.every((f) => f.defer_until_eot), 'tools wait for the end of their turn');
   assert.equal(st.agent.greeting, undefined, 'no greeting over their "Hello?"');
@@ -581,6 +602,38 @@ try {
   assert.equal(r.json.session.language, 'en', 'calls you make yourself stay English');
   r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550186', goal: 'x', language: 'klingon' } });
   assert.equal(r.json.session.language, 'en', 'unknown languages fall back to English');
+
+  // ElevenLabs voices for English calls, and the faster thinking choice.
+  r = await req('/api/voices');
+  const elVoices = r.json.voices.filter((v) => v.provider === 'elevenlabs');
+  assert.deepEqual(elVoices, [{ id: 'el-EXAVITQu4vr4xnSDxMaL', label: 'Sarah, soft, conversational, american', provider: 'elevenlabs' }], 'your ElevenLabs voices are offered, bad IDs skipped');
+  assert.ok(r.json.voices.some((v) => v.id === 'flux-miles-en' && v.provider === 'deepgram'), 'Deepgram voices stay');
+  assert.equal(r.json.default, 'flux-miles-en', 'without ELEVENLABS_VOICE_ID_EN the Deepgram voice stays the default');
+  assert.deepEqual(r.json.thinking, { smart: 'claude-sonnet-5-5', fast: 'claude-haiku-4-5', ready: true });
+  assert.equal(elevenCalls.find((c) => c.url === '/v1/voices').key, 'xi_test');
+  r = await req('/api/voices/el-EXAVITQu4vr4xnSDxMaL/sample?owner=Mk');
+  assert.equal(r.status, 200, 'an ElevenLabs voice can be previewed');
+  assert.match(JSON.parse(elevenCalls.at(-1).body).text, /on behalf of Mk/);
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550185', goal: 'Book a table', voice: 'el-EXAVITQu4vr4xnSDxMaL', thinking: 'fast' } });
+  const agEl = r.json.session;
+  assert.equal(agEl.voice, 'el-EXAVITQu4vr4xnSDxMaL');
+  const twEl = new WebSocket(`ws://localhost:${PORTS.app}/streams/agent`);
+  await new Promise((res) => twEl.on('open', res));
+  agentLog.settings = null;
+  twEl.send(JSON.stringify({ event: 'start', start: { streamSid: 'MZ_EL', callSid: agEl.callSid, customParameters: { sessionId: agEl.id } } }));
+  await waitFor(() => agentLog.settings, 'ElevenLabs agent settings');
+  const el = agentLog.settings.agent;
+  assert.equal(el.language, 'en');
+  assert.ok(Array.isArray(el.speak), 'ElevenLabs first, with fallbacks');
+  assert.deepEqual(el.speak[0].provider, { type: 'eleven_labs', model_id: 'eleven_v4_turbo', language_code: 'en' });
+  assert.equal(el.speak[0].endpoint.url, 'wss://api.elevenlabs.io/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL/multi-stream-input');
+  assert.equal(el.speak.at(-1).provider.model, 'flux-miles-en', 'a Deepgram voice takes over if ElevenLabs fails');
+  assert.deepEqual(el.think.provider, { type: 'anthropic', model: 'claude-haiku-4-5' }, 'faster thinking: Haiku');
+  assert.equal(el.think.endpoint, undefined, 'Haiku runs on Deepgram, no Anthropic key sent');
+  twEl.close();
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550184', goal: 'x', voice: 'el-../../etc' } });
+  assert.equal(r.json.session.voice, '', 'a malformed voice ID is ignored');
+  pass('English calls: ElevenLabs voices from your library (preview and call), Sonnet 5.5 thinking with Haiku as the faster choice');
 
   process.env.CALLPILOT_ENV_FILE = envFile; // so importing the config below reads no real .env
   const { config: cfg } = await import('../src/config.js');

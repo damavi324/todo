@@ -4,9 +4,15 @@ import { useTaskStore } from '../store/useTaskStore'
 import { cp, apiUrl, ownerName, assistantName } from '../lib/callpilot'
 import { ErrorNote, Segmented } from './ui'
 
+const THINKING = [
+  { value: 'smart', label: 'Smarter' },
+  { value: 'fast', label: 'Faster' },
+]
+
 /**
- * Settings → Calling: hear each voice the assistant can use on calls and pick one. Samples are recorded by the
- * calling server through Deepgram (phone quality, like a real call), so the first play of each takes a few seconds.
+ * Settings → Calling: how the assistant thinks on calls, and the voice it uses: hear each one and pick it.
+ * Samples are recorded by the calling server at phone quality (like a real call), so the first play takes a few seconds.
+ * ElevenLabs voices (the most natural) come from your ElevenLabs library once the server has an ElevenLabs key.
  */
 export default function CallVoicePicker() {
   const settings = useTaskStore((s) => s.settings)
@@ -36,9 +42,18 @@ export default function CallVoicePicker() {
     setPlaying({ id, state: 'loading' })
     a.onplaying = () => setPlaying({ id, state: 'playing' })
     a.onended = () => setPlaying((p) => (p.id === id ? { id: '', state: '' } : p))
-    a.onerror = () => { setPlaying({ id: '', state: '' }); setError('Couldn’t play that voice. Check that the server has a working Deepgram key.') }
+    a.onerror = () => {
+      setPlaying({ id: '', state: '' })
+      setError(id.startsWith('el-') ? 'Couldn’t play that voice. Check the ElevenLabs key on the server.' : 'Couldn’t play that voice. Check that the server has a working Deepgram key.')
+    }
     a.play().catch(() => {})
   }
+  const thinking = settings.callThinking || 'smart'
+  // Older servers don't say which voices are ElevenLabs': all of them are Deepgram's.
+  const groups = [
+    { title: 'ElevenLabs voices · most natural', voices: list?.voices.filter((v) => v.provider === 'elevenlabs') || [] },
+    { title: 'Deepgram voices', voices: list?.voices.filter((v) => v.provider !== 'elevenlabs') || [] },
+  ].filter((g) => g.voices.length)
 
   if (error && !list) return <div className="p-4"><ErrorNote tone="warn">{error}</ErrorNote></div>
   if (!list) return <p className="p-4 text-xs text-ink-3 flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" />Loading voices…</p>
@@ -54,32 +69,58 @@ export default function CallVoicePicker() {
           {language === 'ne' && nepali.ready && <p className="text-xs text-ink-3 mt-2">Nepali calls use the ElevenLabs voice set on the calling server. The voices below are for English calls.</p>}
         </div>
       )}
+      {list.thinking && (
+        <div className="mb-4">
+          <p className="text-sm text-ink">How {assistantName()} thinks on calls</p>
+          <p className="text-xs text-ink-3 mt-0.5 mb-2">
+            {thinking === 'fast'
+              ? 'Quicker replies, simpler judgment (Claude Haiku).'
+              : 'Better judgment on tricky calls, a moment slower to reply (Claude Sonnet).'}
+          </p>
+          <Segmented value={thinking} onChange={(v) => updateSettings({ callThinking: v })} options={THINKING} />
+          {thinking === 'smart' && !list.thinking.ready && (
+            <ErrorNote tone="warn" className="mt-2">The calling server has no Anthropic key, so calls use the faster model.</ErrorNote>
+          )}
+        </div>
+      )}
       <p className="text-sm text-ink">Assistant’s voice on calls</p>
       <p className="text-xs text-ink-3 mt-0.5 mb-2">Play a sample, then pick one. It sounds like a phone line, because that’s how the other person hears it.</p>
       {error && <ErrorNote tone="warn" className="mb-2">{error}</ErrorNote>}
-      <ul className="rounded-xl border border-line divide-y divide-line overflow-hidden">
-        {list.voices.map((v) => {
-          const [name, ...rest] = v.label.replace(/^Flux /, '').split(', ')
-          const isChosen = chosen === v.id
-          const p = playing.id === v.id ? playing.state : ''
-          return (
-            <li key={v.id} className={`flex items-center gap-2 pl-2 pr-3 py-1.5 ${isChosen ? 'bg-accent/5' : ''}`}>
-              <button type="button" onClick={() => play(v.id)} aria-label={p ? `Stop ${name}` : `Play ${name}`}
-                className="w-10 h-10 rounded-full flex items-center justify-center text-accent hover:bg-accent/10 flex-shrink-0">
-                {p === 'loading' ? <Loader2 size={17} className="animate-spin" /> : p === 'playing' ? <Square size={15} /> : <Play size={17} />}
-              </button>
-              <button type="button" onClick={() => updateSettings({ callVoice: v.id })} aria-pressed={isChosen}
-                className="flex-1 min-w-0 flex items-center gap-2 text-left py-1.5">
-                <span className="flex-1 min-w-0">
-                  <span className="block text-sm text-ink">{name}{v.id === list.default && <span className="text-xs text-ink-3"> · default</span>}</span>
-                  {rest.length > 0 && <span className="block text-xs text-ink-3 truncate">{rest.join(', ')}</span>}
-                </span>
-                {isChosen && <Check size={17} className="text-accent flex-shrink-0" />}
-              </button>
-            </li>
-          )
-        })}
-      </ul>
+      {groups.map((g) => (
+        <div key={g.title} className="mb-3 last:mb-0">
+          {groups.length > 1 && <p className="text-xs font-medium text-ink-3 mb-1.5 px-1">{g.title}</p>}
+          <VoiceList voices={g.voices} chosen={chosen} defaultId={list.default} playing={playing} play={play}
+            choose={(id) => updateSettings({ callVoice: id })} />
+        </div>
+      ))}
     </div>
+  )
+}
+
+function VoiceList({ voices, chosen, defaultId, playing, play, choose }) {
+  return (
+    <ul className="rounded-xl border border-line divide-y divide-line overflow-hidden">
+      {voices.map((v) => {
+        const [name, ...rest] = v.label.replace(/^Flux /, '').split(', ')
+        const isChosen = chosen === v.id
+        const p = playing.id === v.id ? playing.state : ''
+        return (
+          <li key={v.id} className={`flex items-center gap-2 pl-2 pr-3 py-1.5 ${isChosen ? 'bg-accent/5' : ''}`}>
+            <button type="button" onClick={() => play(v.id)} aria-label={p ? `Stop ${name}` : `Play ${name}`}
+              className="w-10 h-10 rounded-full flex items-center justify-center text-accent hover:bg-accent/10 flex-shrink-0">
+              {p === 'loading' ? <Loader2 size={17} className="animate-spin" /> : p === 'playing' ? <Square size={15} /> : <Play size={17} />}
+            </button>
+            <button type="button" onClick={() => choose(v.id)} aria-pressed={isChosen}
+              className="flex-1 min-w-0 flex items-center gap-2 text-left py-1.5">
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm text-ink">{name}{v.id === defaultId && <span className="text-xs text-ink-3"> · default</span>}</span>
+                {rest.length > 0 && <span className="block text-xs text-ink-3 truncate">{rest.join(', ')}</span>}
+              </span>
+              {isChosen && <Check size={17} className="text-accent flex-shrink-0" />}
+            </button>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
