@@ -393,6 +393,10 @@ try {
   assert.equal(plan.facts_to_share.length, 1, 'empty facts dropped');
   assert.deepEqual(plan.missing_info, ['Insurance provider']);
   assert.equal(claudeRequests.at(-1).json.max_tokens, 4000, 'room for a full plan');
+  assert.equal(plan.leave_voicemail, false, 'no voicemail unless asked for');
+  assert.ok(plan.if_voicemail, 'a voicemail message is still written, ready if you switch it on');
+  r = await req('/api/plan', { method: 'POST', body: { to: '2145550199', goal: 'Reschedule cleaning', brief: 'If nobody picks up, leave a voicemail.' } });
+  assert.equal(r.json.plan.leave_voicemail, true, 'asking for a voicemail switches it on');
   r = await req('/api/plan', { method: 'POST', body: { to: '2145550199', goal: 'Reschedule cleaning', brief: 'CUT-OFF-TEST' } });
   assert.equal(r.status, 200, 'a cut-off plan reply is retried instead of failing the call');
   assert.equal(r.json.plan.objective, 'Move the cleaning to a weekday morning next week');
@@ -693,6 +697,9 @@ try {
   pass('If Deepgram refuses the smarter model, the call switches to the faster one instead of going silent');
 
   process.env.CALLPILOT_ENV_FILE = envFile; // so importing the config below reads no real .env
+  const { voicemailInstruction } = await import('../src/sessions.js');
+  assert.match(voicemailInstruction({ ownerName: 'Mk', leaveVoicemail: true, plan: { if_voicemail: 'Hi, this is Pilot for Mk about the dinner.' } }), /leave this one short message: "Hi, this is Pilot for Mk about the dinner."/, 'the planned message is the one left');
+  assert.match(voicemailInstruction({ ownerName: 'Mk', leaveVoicemail: false, plan: { if_voicemail: 'x' } }), /Do NOT leave a message/);
   const { config: cfg } = await import('../src/config.js');
   const { languageProblem } = await import('../src/language.js');
   const { elevenLabsSpeak } = await import('../src/deepgram.js');
@@ -709,11 +716,27 @@ try {
   assert.deepEqual(r.json.elevenlabs, { plan: 'free', creditsUsed: 2500, creditsLimit: 10000, creditsLeft: 7500, resetsAt: new Date(1796000000 * 1000).toISOString() }, 'ElevenLabs credits left this month');
   pass('Usage page: provider balances come back (or each provider\'s error)');
 
-  // Twilio says a machine answered: the agent is told, the transcript says so, and the notes say voicemail.
-  await req(`/twilio/amd?sessionId=${ag3.id}`, { method: 'POST', form: { CallSid: ag3.callSid, AnsweredBy: 'machine_start' } });
-  await waitFor(() => agentLog.prompts?.some((x) => /answered by voicemail/.test(x)), 'voicemail heads-up to the agent');
+  // Leaving a voicemail is off unless asked for, and can be switched during the call until a machine answers.
   r = await req(`/api/sessions/${ag3.id}`);
-  assert.deepEqual(r.json.call.transcript.filter((l) => l.speaker === 'system').map((l) => l.text), ['Went to voicemail. No one picked up.']);
+  assert.equal(r.json.call.leaveVoicemail, false, 'no voicemail unless asked for');
+  r = await req(`/api/sessions/${ag3.id}/voicemail`, { method: 'POST', body: { leave: true } });
+  assert.deepEqual(r.json, { ok: true, leaveVoicemail: true });
+  await waitFor(() => agentLog.prompts?.some((x) => /UPDATE from .*if this call reaches voicemail, Wait for the beep/.test(x)), 'the agent hears the new choice');
+  assert.ok(ui.events.some((e) => e.type === 'voicemail' && e.sessionId === ag3.id && e.leaveVoicemail === true), 'the app hears the new choice');
+  r = await req(`/api/sessions/${ag3.id}/voicemail`, { method: 'POST', body: { leave: false } });
+  assert.equal(r.json.leaveVoicemail, false);
+  await waitFor(() => agentLog.prompts?.some((x) => /UPDATE from .*Do NOT leave a message/.test(x)), 'the agent hears it switched off');
+
+  // Twilio says a machine answered: the agent is told, the transcript says so, and the notes say voicemail.
+  // With no message wanted, the server ends the call itself.
+  await req(`/twilio/amd?sessionId=${ag3.id}`, { method: 'POST', form: { CallSid: ag3.callSid, AnsweredBy: 'machine_start' } });
+  await waitFor(() => agentLog.prompts?.some((x) => /answered by voicemail.*Do NOT leave a message/.test(x)), 'voicemail heads-up to the agent');
+  await waitFor(() => twilioCalls.find((c) => c.url.endsWith(`/Calls/${ag3.callSid}.json`) && c.params.get('Status') === 'completed'), 'hung up at voicemail, no message');
+  r = await req(`/api/sessions/${ag3.id}`);
+  assert.deepEqual(r.json.call.transcript.filter((l) => l.speaker === 'system').map((l) => l.text), ['Went to voicemail. No one picked up. No message left.']);
+  r = await req(`/api/sessions/${ag3.id}/voicemail`, { method: 'POST', body: { leave: true } });
+  assert.equal(r.status, 409, 'too late once voicemail was reached');
+  assert.match(r.json.error, /already reached voicemail/);
   await req(`/twilio/amd?sessionId=${ag3.id}`, { method: 'POST', form: { CallSid: ag3.callSid, AnsweredBy: 'machine_end_beep' } });
   claudeRequests.length = 0;
   await req(`/twilio/status?sessionId=${ag3.id}`, { method: 'POST', form: { CallSid: ag3.callSid, CallStatus: 'completed' } });
@@ -724,7 +747,7 @@ try {
   assert.ok(claudeRequests.some((c) => /reached VOICEMAIL/.test(c.json.messages[0].content)), 'the note-writer is told it was voicemail');
   r = await req(`/api/sessions/${ag3.id}`);
   assert.equal(r.json.call.transcript.filter((l) => l.speaker === 'system').length, 1, 'the voicemail note is added once');
-  pass('Voicemail is detected, shown in the transcript, and the notes say voicemail');
+  pass('Voicemail: off unless asked, switchable until a machine answers, then hangs up with no message; notes say voicemail');
   tw3.close();
 
   r = await req('/api/sessions', { method: 'POST', body: { mode: 'agent', to: '+12145550155', goal: 'Ask about hours' } });

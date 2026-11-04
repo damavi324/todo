@@ -118,7 +118,7 @@ export function slog(s, level, text) {
   persist(s);
 }
 
-export function createSession({ mode, to, from, goal, brief, plan, owner, about, localNow, skills = [], planUsage, voice = '', assistant = '', language = 'en', thinking = '' }) {
+export function createSession({ mode, to, from, goal, brief, plan, owner, about, localNow, skills = [], planUsage, voice = '', assistant = '', language = 'en', thinking = '', leaveVoicemail = false }) {
   const s = {
     id: crypto.randomUUID(),
     mode, // 'copilot' | 'agent'
@@ -137,6 +137,10 @@ export function createSession({ mode, to, from, goal, brief, plan, owner, about,
     voice, // the voice picked in the app for this call; empty = the server's default
     thinking: thinking === 'fast' ? 'fast' : 'smart', // how the agent thinks: 'smart' (better reasoning) or 'fast'
     language, // what the agent speaks on the call: 'en' or 'ne' (Nepali)
+    // Leave the planned voicemail message if a machine answers. Off unless asked for; the owner can switch it
+    // during the call until voicemail is reached.
+    leaveVoicemail: leaveVoicemail === true,
+    voicemail: false, // a machine answered
     // What this call used: Claude tokens per model (call plan, live tips, notes) and how long it lasted.
     usage: { claude: cleanUsage(planUsage), seconds: 0 },
     status: 'starting',
@@ -220,19 +224,44 @@ export function addLine(s, speaker, text) {
   if (speaker === 'them' && (s.mode === 'copilot' || s.joined)) scheduleSuggestion(s);
 }
 
+/** What the agent does at a voicemail greeting, by the owner's choice for this call. */
+export function voicemailInstruction(s) {
+  const owner = s.ownerName || config.ownerName;
+  if (!s.leaveVoicemail) return `Do NOT leave a message (${owner} chose not to): say nothing more and call finish_call with outcome "voicemail" right away.`;
+  const planned = s.plan?.if_voicemail;
+  return planned
+    ? `Wait for the beep if the greeting is still playing, then leave this one short message: "${planned}" Then call finish_call with outcome "voicemail".`
+    : `Wait for the beep if the greeting is still playing, then leave one short message: who you are, that you are calling for ${owner}, the reason, and that ${owner} will follow up. Then call finish_call with outcome "voicemail".`;
+}
+
 /**
- * Records that a machine answered, not a person: a note in the transcript, and (on an AI call) a heads-up
- * to the agent so it leaves its short message instead of trying to hold a conversation.
+ * Records that a machine answered, not a person: a note in the transcript, and (on an AI call) a heads-up to
+ * the agent. From here the owner's voicemail choice is final. Without a message to leave, the call simply ends.
  */
 export function markVoicemail(s, note = 'Went to voicemail. No one picked up.') {
   if (s.voicemail) return;
   s.voicemail = true;
-  addLine(s, 'system', note);
-  s._agent?.note(
-    'IMPORTANT: this call was answered by voicemail or an answering machine, not a person. Nobody is listening live. ' +
-    'Do not ask questions or wait for answers. After the greeting ends (or the beep), leave your one short voicemail message, ' +
-    'then call finish_call with outcome "voicemail".'
-  );
+  addLine(s, 'system', s.mode === 'agent' && !s.leaveVoicemail ? `${note} No message left.` : note);
+  emit(s, 'voicemail', { voicemail: true, leaveVoicemail: s.leaveVoicemail });
+  s._agent?.note(`IMPORTANT: this call was answered by voicemail or an answering machine, not a person. Nobody is listening live. Do not ask questions or wait for answers. ${voicemailInstruction(s)}`);
+  if (s.mode === 'agent' && !s.leaveVoicemail) s._agent?.endCall?.('voicemail, no message wanted');
+}
+
+/**
+ * The owner switching "leave a voicemail" during a call. Only until a machine has answered: after that the
+ * agent may already be speaking (or have hung up), so the choice can no longer change. Returns an error, or ''.
+ */
+export function setLeaveVoicemail(s, leave) {
+  if (s.mode !== 'agent') return 'Only calls the assistant makes can leave a voicemail.';
+  if (s._finalized) return 'This call has already ended.';
+  if (s.voicemail) return 'The call already reached voicemail, so this can’t change now.';
+  if (s.leaveVoicemail === !!leave) return '';
+  s.leaveVoicemail = !!leave;
+  slog(s, 'info', s.leaveVoicemail ? 'Voicemail: will leave the planned message if a machine answers' : 'Voicemail: no message if a machine answers');
+  s._agent?.note(`UPDATE from ${s.ownerName || config.ownerName}, replacing any earlier voicemail instruction: if this call reaches voicemail, ${voicemailInstruction(s)}`);
+  emit(s, 'voicemail', { voicemail: false, leaveVoicemail: s.leaveVoicemail });
+  persist(s);
+  return '';
 }
 
 export function setPartial(s, speaker, text) {

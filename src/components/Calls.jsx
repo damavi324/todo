@@ -473,10 +473,12 @@ function PlanView() {
     p.if_voicemail && `Voicemail: “${p.if_voicemail}”`,
     p.confirm_before_hanging_up?.length && `Reads back before hanging up: ${p.confirm_before_hanging_up.join(', ')}`,
   ].filter(Boolean)
+  // Voicemail: off unless the plan says you asked for one; changeable here and during the call.
+  const leaveVoicemail = pending.leaveVoicemail ?? !!p.leave_voicemail
   const call = async () => {
     setAuto(false)
     setBusy(true)
-    try { await startCall(pending) } catch (err) {
+    try { await startCall({ ...pending, leaveVoicemail }) } catch (err) {
       if (useCallStore.getState().handsFree) showError(`The call didn’t start. ${err.message}`)
       else notify(err.message, 'error')
     } finally { setBusy(false) }
@@ -510,6 +512,10 @@ function PlanView() {
           </div>
           <p className="text-sm text-ink whitespace-pre-line rounded-lg bg-surface-2 px-3.5 py-2.5 leading-relaxed">{callText(pending) || '—'}</p>
         </div>
+        {pending.mode === 'agent' && (
+          <VoicemailChoice checked={leaveVoicemail} message={p.if_voicemail}
+            onChange={(v) => useCallStore.setState({ pending: { ...pending, leaveVoicemail: v } })} />
+        )}
       </div>
       <p className="text-xs text-ink-3 mt-6">Call plan · {callWith(pending)}</p>
       <h2 className="text-lg font-semibold text-ink mt-1 leading-snug">{p.objective || 'Call plan'}</h2>
@@ -549,6 +555,27 @@ function PlanView() {
         </button>
       </div>
     </Card>
+  )
+}
+
+/**
+ * "Leave a voicemail if a machine answers": off unless you asked for one when planning. The message is already
+ * written in the plan, so turning it on costs nothing extra. On a live call it can change until a machine has
+ * answered; from then on it is locked, because the assistant may already be speaking (or have hung up).
+ */
+function VoicemailChoice({ checked, message, onChange, locked, busy }) {
+  return (
+    <label className={`flex items-start gap-3 rounded-lg border border-line px-3.5 py-3 ${locked ? 'opacity-70' : 'cursor-pointer'}`}>
+      <input type="checkbox" className="mt-0.5 w-5 h-5 accent-[rgb(var(--accent))] flex-shrink-0" checked={!!checked} disabled={locked || busy}
+        onChange={(e) => onChange(e.target.checked)} />
+      <span className="flex-1 min-w-0">
+        <span className="block text-sm font-medium text-ink">Leave a voicemail if no one answers</span>
+        <span className="block text-xs text-ink-3 mt-0.5">
+          {locked || (checked ? (message ? `It will say: “${message}”` : 'It will leave a short message saying who it is and why it called.') : 'Off: if voicemail picks up, the assistant hangs up without a message.')}
+        </span>
+      </span>
+      {busy && <Loader2 size={15} className="animate-spin text-ink-3 mt-0.5" />}
+    </label>
   )
 }
 
@@ -687,6 +714,12 @@ function ActiveCall() {
         {from && <p className="text-xs text-ink-3 mt-1">The other person sees {formatNumber(from)}</p>}
         {session.goal && <p className="text-sm text-ink-2 mt-1.5 line-clamp-2">{session.goal}</p>}
         {state && <p className="mt-4 text-sm text-ink-2 flex items-center gap-2"><Bot size={15} className="text-accent" />{state}</p>}
+        {session.mode === 'agent' && !ended && (
+          <div className="mt-4">
+            <VoicemailChoice checked={session.leaveVoicemail} message={session.plan?.if_voicemail} busy={s.voicemailBusy} onChange={s.setLeaveVoicemail}
+              locked={session.voicemail ? (session.leaveVoicemail ? 'Voicemail picked up: leaving the message now.' : 'Voicemail picked up: hanging up without a message.') : ''} />
+          </div>
+        )}
         {!ended && (
           agentMode ? (
             <div className="flex gap-2 mt-5">

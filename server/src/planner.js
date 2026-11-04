@@ -22,7 +22,8 @@ const SCHEMA = `{
   "never_share": ["types of info the agent must not say, e.g. Social Security number"],
   "likely_questions": [{"q": "question the other side may ask", "a": "answer, or 'Ask the owner'"}],
   "if_phone_menu": "which menu option or keyword to choose, or empty",
-  "if_voicemail": "the short voicemail message to leave",
+  "if_voicemail": "the short voicemail message to leave, always written (one or two sentences: who is calling, for whom, why, and that they will follow up)",
+  "leave_voicemail": "true only if the owner explicitly asked to leave a voicemail or a message if nobody answers; otherwise false",
   "confirm_before_hanging_up": ["only hard details to read back: a date, time, price, address or confirmation number; usually empty for a simple favor or question"],
   "missing_info": ["things the business will probably ask that the details do not answer"]
 }`;
@@ -38,6 +39,7 @@ export function plannerSystem(owner = config.ownerName, skills = [], assistant =
     `- Write can_agree_to strictly from what ${owner} said is acceptable. Anything involving money, fees, cancellations, contracts, sign-ups or choices outside stated preferences goes in ask_owner_before.`,
     '- If the details contain a Social Security number, full card or bank account number, password, or PIN, never copy the value anywhere. List only the type under never_share.',
     '- Keep every string short and speakable. The opening must sound like a person talking, not a form.',
+    `- Always write if_voicemail, short and ready to say. Set leave_voicemail to true only when ${owner} explicitly asked for a voicemail or a message to be left ("leave a voicemail", "leave a message if they don't pick up"); otherwise false, and no message is left.`,
     '- confirm_before_hanging_up holds only details that are easy to get wrong and needed afterwards (a date, time, price, address, confirmation number). Leave it empty when the call is a simple favor, question or yes/no, and never list how or when they will do something (by text, by email, today).',
     skills.length
       ? `${owner.toUpperCase()}'S SKILLS (how ${owner} wants every call handled; follow them, and where they conflict with the rules above, they win, except never invent facts):\n${skills.map((x) => `- ${x}`).join('\n')}\n` +
@@ -77,7 +79,14 @@ export async function generatePlan({ to, goal, brief, owner, about, skills, assi
     if (!plan) console.warn(`[plan] second reply not usable either (stop: ${reply.meta.stopReason || '?'}, ${reply.text.length} chars)`);
   }
   if (!plan) throw new Error('Could not build a call plan from the details. Try rephrasing the goal.');
+  // Asked for in so many words ("leave a voicemail", "leave them a message"): leave one, whatever the model said.
+  if (asksForVoicemail(`${goal || ''}\n${details}`)) plan.leave_voicemail = true;
   return plan;
+}
+
+/** The owner's own words ask for a voicemail or message to be left. */
+export function asksForVoicemail(text) {
+  return /\b(leave|drop)\b[^.!?\n]{0,25}\b(voice ?mail|vm|message)\b/i.test(String(text || ''));
 }
 
 /** The owner's call skills from the app: short instructions, at most 20. */
@@ -117,6 +126,7 @@ export function normalizePlan(p) {
       : [],
     if_phone_menu: str(p.if_phone_menu, 300),
     if_voicemail: str(p.if_voicemail, 400),
+    leave_voicemail: p.leave_voicemail === true || p.leave_voicemail === 'true',
     confirm_before_hanging_up: strList(p.confirm_before_hanging_up),
     missing_info: strList(p.missing_info, 8),
   };
@@ -145,7 +155,7 @@ export function planToPrompt(plan, owner = config.ownerName) {
     list('Never share:', plan.never_share),
     list('Likely questions and answers:', plan.likely_questions.map((x) => `${x.q} -> ${x.a || 'ask ' + owner}`)),
     plan.if_phone_menu ? `If you hit a phone menu: ${plan.if_phone_menu}\n` : '',
-    plan.if_voicemail ? `If you reach voicemail, say: ${plan.if_voicemail}\n` : '',
+    plan.if_voicemail ? `Prepared voicemail message (leave it only when the voicemail rule says to): ${plan.if_voicemail}\n` : '',
     list('Before hanging up, confirm:', plan.confirm_before_hanging_up),
     list(`Not covered by ${owner}'s details (ask ${owner} if it comes up):`, plan.missing_info),
   ].filter(Boolean).join('\n');

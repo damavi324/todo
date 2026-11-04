@@ -66,6 +66,7 @@ const initial = {
   joinPending: false,
   pending: null, // { mode, to, goal, brief, plan } awaiting "Call now"
   draft: null, // prefill for the compose form
+  voicemailBusy: false, // switching "leave a voicemail" on a live call
   errorDialog: '', // a problem with a call asked for by voice, shown as a pop-up (never spoken)
   draftVersion: 0, // bumps with each new draft so the form starts over from it
   detail: null,
@@ -201,6 +202,9 @@ export const useCallStore = create((set, get) => ({
         if (get().question?.id === ev.questionId) set({ question: null })
         CallSession.clearAlert().catch(() => {})
         break
+      case 'voicemail':
+        set({ session: { ...s, voicemail: !!(ev.voicemail || s.voicemail), leaveVoicemail: !!ev.leaveVoicemail } })
+        break
       case 'agent_state':
         set({ agentState: { state: ev.state, detail: ev.detail } })
         break
@@ -289,6 +293,22 @@ export const useCallStore = create((set, get) => ({
   },
 
   // ---------- starting and controlling calls ----------
+  // Switch "leave a voicemail" on a live AI call. The server refuses once a machine has answered.
+  async setLeaveVoicemail(leave) {
+    const s = get().session
+    if (!s || get().voicemailBusy) return
+    set({ session: { ...s, leaveVoicemail: leave }, voicemailBusy: true })
+    try {
+      await cp(`/api/sessions/${s.id}/voicemail`, { leave })
+    } catch (err) {
+      const now = get().session
+      if (now?.id === s.id) set({ session: { ...now, leaveVoicemail: !leave, voicemail: now.voicemail || /voicemail/i.test(err.message) } })
+      get().notify(err.message || 'Couldn’t change the voicemail choice.', 'error')
+    } finally {
+      set({ voicemailBusy: false })
+    }
+  },
+
   setDraft(draft) {
     set({ draft, view: 'compose', draftVersion: get().draftVersion + 1, handsFree: false })
   },
