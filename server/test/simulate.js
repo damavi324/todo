@@ -82,8 +82,13 @@ const claudeServer = http.createServer((req, res) => {
       : isSummary
       ? '{"outcome":"done","headline":"Cleaning moved to Tue 9am","summary":"The office moved the appointment.","key_facts":["Tue 9:00 am"],"appointments":[{"title":"Dental cleaning","date":"2026-11-03","time":"09:00"},{"title":"No date","date":"next week"}],"action_items":["Bring insurance card",{"title":"Pay the $25 fee","date":"2026-11-02"}],"callback_after":"sometime"}'
       : '```json\n{"say":["Could you do Tuesday at 9am?"],"note":"They mentioned a $25 fee"}\n```';
+    // A plan reply cut off at the token limit (the smart model only), as a long Nepali plan can be.
+    if (isPlan && /CUT-OFF-TEST/.test(json.messages[0].content) && json.model === 'claude-sonnet-5-5') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ content: [{ type: 'text', text: text.slice(0, 120) }], stop_reason: 'max_tokens', usage: { input_tokens: 1000, output_tokens: 4000 } }));
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ content: [{ type: 'text', text }], usage: { input_tokens: 1000, output_tokens: 200 } }));
+    res.end(JSON.stringify({ content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 1000, output_tokens: 200 } }));
   });
 }).listen(PORTS.claude);
 
@@ -370,6 +375,11 @@ try {
   assert.equal(plan.objective, 'Move the cleaning to a weekday morning next week');
   assert.equal(plan.facts_to_share.length, 1, 'empty facts dropped');
   assert.deepEqual(plan.missing_info, ['Insurance provider']);
+  assert.equal(claudeRequests.at(-1).json.max_tokens, 4000, 'room for a full plan');
+  r = await req('/api/plan', { method: 'POST', body: { to: '2145550199', goal: 'Reschedule cleaning', brief: 'CUT-OFF-TEST' } });
+  assert.equal(r.status, 200, 'a cut-off plan reply is retried instead of failing the call');
+  assert.equal(r.json.plan.objective, 'Move the cleaning to a weekday morning next week');
+  assert.deepEqual(claudeRequests.slice(-2).map((x) => x.json.model), ['claude-sonnet-5-5', 'claude-haiku-5-5'], 'the retry uses the fast model');
   const planReq = claudeRequests.find((c) => /call planner/.test(c.json.system));
   assert.equal(planReq.json.model, 'claude-sonnet-5-5');
   assert.ok(planReq.json.messages[0].content.length > 20000, 'long details reach the planner');

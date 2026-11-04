@@ -53,14 +53,28 @@ export async function generatePlan({ to, goal, brief, owner, about, skills, assi
   const details = String(brief || goal || '').slice(0, MAX_DETAILS);
   const skillList = cleanSkills(skills);
   const prompt = `Phone number being called: ${to}\n\nAbout ${name} (true on every call; do not ask the other person for these):\n${standing || '(none)'}\n\nThis call only:\n${details || '(not given)'}`;
-  let text;
+  const system = plannerSystem(name, skillList, assistantNameOf(assistant), language);
+  // Room for a full plan: Nepali text takes about twice the tokens of English, and a cut-off reply is unusable JSON.
+  const ask = (model, timeoutMs) => {
+    const meta = {};
+    return complete({ model, system, prompt, maxTokens: 4000, timeoutMs, usage, meta }).then((text) => ({ text, meta }));
+  };
+  let reply;
   try {
-    text = await complete({ model: config.anthropic.smartModel, system: plannerSystem(name, skillList, assistantNameOf(assistant), language), prompt, maxTokens: 1800, timeoutMs: 60000, usage });
+    reply = await ask(config.anthropic.smartModel, 60000);
   } catch (err) {
     // Fall back to the fast model so a slow or unavailable model never blocks the call.
-    text = await complete({ model: config.anthropic.fastModel, system: plannerSystem(name, skillList, assistantNameOf(assistant), language), prompt, maxTokens: 1800, timeoutMs: 30000, usage });
+    console.warn(`[plan] ${config.anthropic.smartModel} failed (${err.message}); trying ${config.anthropic.fastModel}`);
+    reply = await ask(config.anthropic.fastModel, 30000);
   }
-  const plan = normalizePlan(parseJson(text));
+  let plan = normalizePlan(parseJson(reply.text));
+  if (!plan) {
+    // A reply that isn't a readable plan (cut off, or not JSON) gets one more try with the fast model.
+    console.warn(`[plan] reply not usable (stop: ${reply.meta.stopReason || '?'}, ${reply.text.length} chars); trying ${config.anthropic.fastModel}`);
+    reply = await ask(config.anthropic.fastModel, 30000);
+    plan = normalizePlan(parseJson(reply.text));
+    if (!plan) console.warn(`[plan] second reply not usable either (stop: ${reply.meta.stopReason || '?'}, ${reply.text.length} chars)`);
+  }
   if (!plan) throw new Error('Could not build a call plan from the details. Try rephrasing the goal.');
   return plan;
 }

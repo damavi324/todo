@@ -9,8 +9,11 @@ export function addUsage(tally, model, u) {
   t.calls += 1;
 }
 
-/** One-shot Claude call via the Messages API. Returns the text of the reply; `usage` (optional) collects token counts. */
-export async function complete({ model, system, prompt, maxTokens = 400, timeoutMs = 20000, usage }) {
+/**
+ * One-shot Claude call via the Messages API. Returns the text of the reply; `usage` (optional) collects token
+ * counts, and `meta` (optional) gets { stopReason } ("max_tokens" means the reply was cut off).
+ */
+export async function complete({ model, system, prompt, maxTokens = 400, timeoutMs = 20000, usage, meta }) {
   const a = config.anthropic;
   if (!a.apiKey) throw new Error('ANTHROPIC_API_KEY is not set');
   const ctrl = new AbortController();
@@ -34,6 +37,7 @@ export async function complete({ model, system, prompt, maxTokens = 400, timeout
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(`Claude ${res.status}: ${json?.error?.message || 'request failed'}`);
     addUsage(usage, model, json.usage);
+    if (meta) meta.stopReason = json.stop_reason || '';
     return (json.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   } finally {
     clearTimeout(timer);
