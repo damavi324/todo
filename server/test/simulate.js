@@ -442,6 +442,8 @@ try {
   assert.deepEqual(st.agent.listen.provider, { type: 'deepgram', model: 'flux-general-en', version: 'v2', eager_eot_threshold: 0.5, eot_timeout_ms: 3000 });
   assert.deepEqual(st.agent.speak.provider, { type: 'deepgram', version: 'v2', model: 'flux-miles-en', speed: 1, expressivity: 0 });
   assert.match(st.agent.think.prompt, /usually one sentence, at most two/);
+  assert.match(st.agent.think.prompt, /When they agree to something, take it as done/, 'no follow-ups after a yes');
+  assert.match(st.agent.think.prompt, /A simple yes .* needs no read-back/, 'no read-back of a simple yes');
   assert.match(st.agent.think.prompt, /Do not ask "what's your name\?"/);
   assert.deepEqual(st.agent.think.provider, { type: 'anthropic', model: 'claude-sonnet-5-5' }, 'calls think with Sonnet 5.5 by default');
   assert.equal(st.agent.think.endpoint.url, `http://localhost:${PORTS.claude}/v1/messages`, 'Sonnet 5.5 runs on our own Anthropic key');

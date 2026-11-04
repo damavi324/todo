@@ -23,7 +23,7 @@ const SCHEMA = `{
   "likely_questions": [{"q": "question the other side may ask", "a": "answer, or 'Ask the owner'"}],
   "if_phone_menu": "which menu option or keyword to choose, or empty",
   "if_voicemail": "the short voicemail message to leave",
-  "confirm_before_hanging_up": ["details to read back, e.g. date, time, confirmation number"],
+  "confirm_before_hanging_up": ["only hard details to read back: a date, time, price, address or confirmation number; usually empty for a simple favor or question"],
   "missing_info": ["things the business will probably ask that the details do not answer"]
 }`;
 
@@ -38,6 +38,7 @@ export function plannerSystem(owner = config.ownerName, skills = [], assistant =
     `- Write can_agree_to strictly from what ${owner} said is acceptable. Anything involving money, fees, cancellations, contracts, sign-ups or choices outside stated preferences goes in ask_owner_before.`,
     '- If the details contain a Social Security number, full card or bank account number, password, or PIN, never copy the value anywhere. List only the type under never_share.',
     '- Keep every string short and speakable. The opening must sound like a person talking, not a form.',
+    '- confirm_before_hanging_up holds only details that are easy to get wrong and needed afterwards (a date, time, price, address, confirmation number). Leave it empty when the call is a simple favor, question or yes/no, and never list how or when they will do something (by text, by email, today).',
     skills.length
       ? `${owner.toUpperCase()}'S SKILLS (how ${owner} wants every call handled; follow them, and where they conflict with the rules above, they win, except never invent facts):\n${skills.map((x) => `- ${x}`).join('\n')}\n` +
         'If a skill says how to open the call, write that first line in greeting, filled in with the real name of the person or business and the reason, and keep opening to what comes after it.'
