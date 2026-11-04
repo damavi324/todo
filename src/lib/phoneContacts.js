@@ -36,6 +36,23 @@ export const phoneContacts = () => cache
 
 const digits = (phone) => String(phone || '').replace(/\D/g, '').slice(-10)
 
+/**
+ * A US (North American, +1) number: 10 digits, or 11 starting with 1. A number written with another country
+ * code (+977…, 00 44…) is not. Calls only go to these, so contact matching ignores every other number.
+ */
+export function isUSNumber(phone) {
+  const raw = String(phone || '').trim()
+  let d = raw.replace(/\D/g, '')
+  if (raw.startsWith('00')) d = d.slice(2)
+  // Written with a country code: only +1 is ours.
+  if (/^(\+|00)/.test(raw) && !(d.length === 11 && d.startsWith('1'))) return false
+  if (d.length === 11 && d.startsWith('1')) d = d.slice(1)
+  // North American numbers: neither the area code nor the exchange starts with 0 or 1 (so a Nepali 984-123…
+  // mobile saved without +977 isn't taken for one).
+  return d.length === 10 && /^[2-9]\d{2}[2-9]/.test(d)
+}
+const usOnly = (contacts) => contacts.filter((c) => isUSNumber(c.phone))
+
 /** The app's own contacts, then the phone's, without listing a number twice. */
 export function mergeContacts(appContacts, phone) {
   const known = new Set(appContacts.map((c) => digits(c.phone)))
@@ -137,7 +154,9 @@ function fit(c, said) {
  * inSpeech: text is a whole spoken sentence ("call Keshab and ask..."), so most of it is not a name. Then a
  * contact needs at least two of its name words heard (or its one-word name heard exactly).
  */
-export function pickByName(contacts, text, { inSpeech = false } = {}) {
+export function pickByName(allContacts, text, { inSpeech = false } = {}) {
+  // Only US numbers can be called: a person with several numbers is matched on their US one, others not at all.
+  const contacts = usOnly(allContacts)
   const q = String(text || '').trim().toLowerCase()
   if (!q) return null
   let found = contacts.filter((c) => c.name.toLowerCase() === q)
@@ -180,7 +199,8 @@ export function pickByName(contacts, text, { inSpeech = false } = {}) {
 }
 
 /** Contacts whose names sound like words in what was said, best fit first, for the assistant to choose from (names only). */
-export function likelyContacts(contacts, text, max = 12) {
+export function likelyContacts(allContacts, text, max = 12) {
+  const contacts = usOnly(allContacts)
   const said = nameWords(text)
   const best = new Map()
   for (const c of namedByRelation(contacts, text)) best.set(c.name, 10)
@@ -195,7 +215,8 @@ export function likelyContacts(contacts, text, max = 12) {
 }
 
 /** Contacts for a name typed in the call form: names containing it first, then ones that sound like it. */
-export function searchContacts(contacts, text, max = 8) {
+export function searchContacts(allContacts, text, max = 8) {
+  const contacts = usOnly(allContacts)
   const q = String(text || '').trim().toLowerCase()
   const direct = contacts.filter((c) => c.name.toLowerCase().includes(q))
   if (direct.length >= max) return direct.slice(0, max)

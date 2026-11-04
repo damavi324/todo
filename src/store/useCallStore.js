@@ -66,6 +66,7 @@ const initial = {
   joinPending: false,
   pending: null, // { mode, to, goal, brief, plan } awaiting "Call now"
   draft: null, // prefill for the compose form
+  errorDialog: '', // a problem with a call asked for by voice, shown as a pop-up (never spoken)
   draftVersion: 0, // bumps with each new draft so the form starts over from it
   detail: null,
   history: archivedList(), // phone copy first, so history shows instantly (even offline)

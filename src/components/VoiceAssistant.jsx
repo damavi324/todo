@@ -81,6 +81,8 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall: hand
       const { result: r, usage } = await cp('/api/assistant', { text: heard, ...callerContext(), ...localNow(), lists: lists.map((l) => ({ id: l.id, name: l.name })), contacts: likelyContacts(people, heard) }, { timeoutMs: 45000 })
       // The name it heard, matched to a saved or phone contact, gives the number. If that name was garbled,
       // look for a contact's name anywhere in what you said.
+      // The name as you said it, kept so the call screen can offer other people who sound like it.
+      const heardName = r.call?.contact || ''
       if (r.call && !r.call.to) {
         const named = r.call.contact && pickByName(people, r.call.contact)
         const who = named || pickByName(people, heard, { inSpeech: true })
@@ -90,13 +92,14 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall: hand
           r.call = { ...r.call, to: who.phone, contact: who.name, confirmWho: who.name.trim().toLowerCase() !== said }
         }
       }
+      if (r.call) r.call.heard = heardName
       recordOtherUsage('assistant', usage)
       // Single, clear intent: go straight to it.
       if (r.kind === 'task' && r.task) return onTask({ ...r.task, listId: r.task.listId || undefined })
       // A call you said out loud, with who and why: plan it and dial, hands-free (cancel stays one tap away).
-      // A guessed contact stops here so you can see the name before anyone is dialed.
-      if (spoken && r.kind === 'call' && r.call && r.call.when !== 'later' && r.call.to && r.call.goal && !r.call.confirmWho) {
-        return onCall({ ...callDraft(r), autoStart: true })
+      // The call screen shows who it matched, with one tap to pick someone else; a guessed contact waits for your OK.
+      if (spoken && r.kind === 'call' && r.call && r.call.when !== 'later' && r.call.to && r.call.goal) {
+        return onCall({ ...callDraft(r), autoStart: true, heard: r.call.heard, confirmWho: !!r.call.confirmWho })
       }
       setResult(r)
       setPhase('result')
@@ -282,7 +285,7 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall: hand
                 {result.call.goal && <p className="text-sm text-ink-2 mt-0.5">{result.call.goal}</p>}
                 {!result.call.to && <p className="text-xs text-warn mt-1">No number heard. You can add it on the next screen.</p>}
                 {result.call.confirmWho && <p className="text-xs text-warn mt-1">Matched to {result.call.contact}. Check that this is the right person before the call starts.</p>}
-                <button onClick={() => onCall({ ...callDraft(result), autoStart: !!result.call.to && !!result.call.goal })} className="mt-3 w-full flex items-center justify-center gap-2 rounded-lg bg-accent text-white font-medium h-10">
+                <button onClick={() => onCall({ ...callDraft(result), autoStart: !!result.call.to && !!result.call.goal, heard: result.call.heard, confirmWho: !!result.call.confirmWho })} className="mt-3 w-full flex items-center justify-center gap-2 rounded-lg bg-accent text-white font-medium h-10">
                   <Phone size={16} />{result.call.mode === 'copilot' ? 'Set up my call' : `Have ${assistantName()} call ${result.call.when === 'later' ? 'now' : ''}`.trim()}
                 </button>
               </div>

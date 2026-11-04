@@ -808,6 +808,8 @@ try {
   assert.match(aReq.json.messages[0].content, /Tuesday/);
   assert.match(aReq.json.messages[0].content, /similar name \(spelling may differ\): Puja Khanal; Bright Smiles Dental\. Speech-to-text often garbles names .*put that contact's name in call\.contact exactly as written here/);
   assert.match(aReq.json.system, /no relationship words or brackets/);
+  assert.match(aReq.json.system, /starts with "call", "phone", "ring" or "dial".*is a call made NOW/, "a bare \"Call X\" is a call, not a task");
+  assert.match(aReq.json.system, /Never turn a call request into a task just because the name is unclear/);
   pass('Voice assistant: one sentence becomes a task with date/time/list plus a call for Pilot');
 
   const appUpdate = twilioCalls.find((c) => c.url === '/2010-04-01/Accounts/AC_TEST/Applications/AP_TEST.json' && c.params.get('VoiceUrl'));

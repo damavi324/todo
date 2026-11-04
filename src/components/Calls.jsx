@@ -12,7 +12,7 @@ import { useTaskStore } from '../store/useTaskStore'
 import { formatNumber, assistantName, ownerName, isCallPilotReady, samePhone } from '../lib/callpilot'
 import { startDictation, listenUntilPause } from '../lib/dictation'
 import { say } from '../lib/notifications'
-import { loadPhoneContacts, phoneContacts, mergeContacts, pickByName, searchContacts } from '../lib/phoneContacts'
+import { loadPhoneContacts, phoneContacts, mergeContacts, pickByName, searchContacts, likelyContacts } from '../lib/phoneContacts'
 import { formatDue } from '../lib/dates'
 import { addAppointment, addFollowUp, callWith, contactFor, scheduleCallback, callbackTime } from '../lib/callFollowUps'
 import { Button, IconButton, Note, Segmented, Sheet, fieldClass } from './ui'
@@ -125,6 +125,79 @@ function Countdown({ label, seconds = HANDS_FREE_SECONDS, onDone, onCancel }) {
     </div>
   )
 }
+// A problem with a call asked for by voice: shown as a pop-up to read and dismiss, never read out loud.
+const showError = (message) => useCallStore.setState({ errorDialog: String(message || 'Something went wrong.') })
+
+function ErrorDialog() {
+  const message = useCallStore((s) => s.errorDialog)
+  if (!message) return null
+  const close = () => useCallStore.setState({ errorDialog: '' })
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50 fade-in" role="alertdialog" aria-modal="true" aria-labelledby="call-error-title">
+      <div className="w-full max-w-sm rounded-2xl bg-surface shadow-pop p-5">
+        <div className="flex items-center gap-2 text-danger"><AlertTriangle size={18} /><h2 id="call-error-title" className="font-semibold text-ink">The call couldn’t go ahead</h2></div>
+        <p className="text-sm text-ink-2 mt-2 leading-relaxed">{message}</p>
+        <Button variant="primary" className="w-full mt-4 h-11" onClick={close} autoFocus>OK</Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Who a call asked for by voice will go to, with one tap to pick someone else. The other choices are the
+ * contacts that sound like the name you said (US numbers only), and the search starts from that name, so
+ * nothing has to be retyped. With confirm, the match was a guess: nothing dials until you choose.
+ */
+function WhoToCall({ to, heard, confirm, onPick, onConfirm }) {
+  const contacts = useTaskStore((s) => s.contacts)
+  const [open, setOpen] = useState(!!confirm)
+  const [query, setQuery] = useState(heard || '')
+  const everyone = mergeContacts(contacts, phoneContacts())
+  const current = contactFor(to)
+  const sounds = new Set(likelyContacts(everyone, heard || ''))
+  const q = query.trim()
+  const found = q ? searchContacts(everyone, q, 8) : []
+  // Best guesses for what you said first, then whatever the search finds; one row per number, not the current one.
+  const seen = new Set()
+  const choices = [...everyone.filter((c) => sounds.has(c.name)), ...found]
+    .filter((c) => !samePhone(c.phone, to) && !seen.has(c.phone.replace(/\D/g, '').slice(-10)) && seen.add(c.phone.replace(/\D/g, '').slice(-10)))
+    .slice(0, 6)
+  return (
+    <div className={`rounded-xl border ${confirm ? 'border-warn/50 bg-warn/5' : 'border-line'} px-3.5 py-3`}>
+      <div className="flex items-center gap-3">
+        <span className="w-9 h-9 rounded-full bg-accent/10 text-accent flex items-center justify-center flex-shrink-0"><UserRound size={17} /></span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-sm font-medium text-ink truncate">{current?.name || formatNumber(to) || to}</span>
+          <span className="block text-xs text-ink-3 tabular-nums truncate">
+            {current?.label && `${current.label} · `}{formatNumber(to) || to}{heard && ` · you said “${heard}”`}
+          </span>
+        </span>
+        {!open && <Button size="sm" onClick={() => setOpen(true)}>Change</Button>}
+      </div>
+      {confirm && <p className="text-xs text-warn mt-2">Best match for what you said. Is this who you meant?</p>}
+      {confirm && <Button variant="primary" size="sm" className="w-full mt-2" onClick={onConfirm}><Check size={15} />Yes, call {current?.name || 'them'}</Button>}
+      {open && (
+        <div className="mt-3">
+          <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} autoComplete="off" autoCorrect="off" spellCheck={false}
+            placeholder="Search contacts" aria-label="Search contacts" className={`${fieldClass} w-full h-10 text-sm`} />
+          <ul className="mt-2 rounded-lg border border-line divide-y divide-line overflow-hidden">
+            {choices.map((c) => (
+              <li key={c.id || c.phone}>
+                <button type="button" onClick={() => onPick(c)} className="w-full flex items-center justify-between gap-3 px-3 h-11 text-left hover:bg-surface-2">
+                  <span className="text-sm text-ink truncate">{c.name}</span>
+                  <span className="text-xs text-ink-3 tabular-nums flex-shrink-0">{c.label && <span className="mr-1.5">{c.label}</span>}{formatNumber(c.phone) || c.phone}</span>
+                </button>
+              </li>
+            ))}
+            {!choices.length && <li className="px-3 py-2.5 text-xs text-ink-3">No other contacts match. Try another spelling.</li>}
+          </ul>
+          {!confirm && <button type="button" onClick={() => setOpen(false)} className="text-xs text-ink-3 mt-2 px-1">Keep {current?.name || 'this number'}</button>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function callText(draft) {
   const goal = (draft?.goal || '').trim()
   // A saved contact's details were added for the assistant; they're added again on the next call.
@@ -208,9 +281,12 @@ function Compose() {
   // Used up: the next time the form opens without a new draft, it starts empty.
   useEffect(() => { if (draft) useCallStore.setState({ draft: null }) }, [draft])
 
-  // An "I'll talk" call started by voice, about to dial.
+  // Who a voice request matched, and the name you said, so the next screen can offer others who sound like it.
+  const [who, setWho] = useState(() => (draft?.heard || draft?.confirmWho ? { heard: draft.heard || '', confirm: !!draft.confirmWho } : null))
+  // An "I'll talk" call started by voice, about to dial (not before you OK a guessed contact).
   const [autoCall, setAutoCall] = useState(() =>
-    draft?.autoStart && draft.mode === 'copilot' && draft.to ? { mode: 'copilot', to: draft.to, text: callText(draft) } : null)
+    draft?.autoStart && draft.mode === 'copilot' && draft.to && !draft.confirmWho ? { mode: 'copilot', to: draft.to, text: callText(draft) } : null)
+  const [countdownKey, setCountdownKey] = useState(0)
 
   // The phone's own contacts (Android, once allowed) join the ones saved here.
   const [phoneList, setPhoneList] = useState(phoneContacts)
@@ -248,32 +324,35 @@ function Compose() {
     if (/[a-z]/i.test(number)) {
       const msg = `I couldn’t match “${fields.to.trim()}” to one contact. Pick them from the list, or type the number.`
       setError(msg)
-      if (handsFree) say(msg)
+      if (handsFree) showError(msg)
       return
     }
     const from = useTaskStore.getState().settings.callFromNumber
     if (samePhone(from, number)) {
       const msg = 'That number is the one this call would show as coming from, so it would go straight to voicemail. Pick the other number under Call from, or call a different phone.'
       setError(msg)
-      if (handsFree) say(msg)
+      if (handsFree) showError(msg)
       return
     }
     const body = { mode: fields.mode, to: number, goal: note, brief: note, language: fields.mode === 'agent' ? fields.language || language : 'en' }
+    // Still the person the voice request matched: the plan screen shows them with one tap to change.
+    if (who && samePhone(number, draft?.to)) body.who = who
     useCallStore.setState({ handsFree })
     try {
       if (fields.mode === 'agent') {
         if (!note) throw new Error(`Tell ${assistantName()} what this call is for`)
         setBusy('plan')
         const plan = await makePlan(body)
-        if (handsFree) say(`${plan.objective || 'The plan is ready'}. Calling in ${HANDS_FREE_SECONDS} seconds. Tap cancel to stop.`)
+        if (handsFree && !body.who?.confirm) say(`${plan.objective || 'The plan is ready'}. Calling in ${HANDS_FREE_SECONDS} seconds. Tap cancel to stop.`)
       } else {
         setBusy('call')
         await startCall(body)
       }
     } catch (err) {
       setError(err.message)
-      notify(err.message, 'error')
-      if (handsFree) say(`That didn't work. ${err.message}`)
+      // Asked for by voice: a pop-up to read and dismiss, never read out loud.
+      if (handsFree) showError(err.message)
+      else notify(err.message, 'error')
     } finally {
       setBusy('')
     }
@@ -293,7 +372,7 @@ function Compose() {
     if (mode === 'agent') {
       say(`Got it. Getting the call to ${callWith({ to: resolveTo(to) })} ready.`)
       Promise.resolve().then(() => go({ mode, to, text }, { handsFree: true }))
-    } else {
+    } else if (!who?.confirm) {
       say(`Calling ${callWith({ to: resolveTo(to) })} in ${HANDS_FREE_SECONDS} seconds.`)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -302,8 +381,13 @@ function Compose() {
   return (
     <Card>
       <form onSubmit={submit} className="p-5 space-y-5">
+        {mode === 'copilot' && who && draft?.autoStart && (autoCall || who.confirm) && (
+          <WhoToCall to={resolveTo(to)} heard={who.heard} confirm={who.confirm}
+            onPick={(c) => { setTo(formatNumber(c.phone) || c.phone); setWho({ ...who, confirm: false }); setAutoCall({ mode: 'copilot', to: c.phone, text }); setCountdownKey((k) => k + 1) }}
+            onConfirm={() => { setWho({ ...who, confirm: false }); setAutoCall({ mode: 'copilot', to: resolveTo(to), text }) }} />
+        )}
         {autoCall && (
-          <Countdown label={`Calling ${callWith({ to: resolveTo(autoCall.to) })}`}
+          <Countdown key={countdownKey} label={`Calling ${callWith({ to: resolveTo(autoCall.to) })}`}
             onDone={() => { const fields = autoCall; setAutoCall(null); go(fields, { handsFree: true }) }}
             onCancel={() => setAutoCall(null)} />
         )}
@@ -379,8 +463,9 @@ function Compose() {
 function PlanView() {
   const { pending, startCall, setDraft, notify } = useCallStore()
   const [busy, setBusy] = useState(false)
-  // Asked for by voice: call on its own after a short countdown, unless you cancel.
-  const [auto, setAuto] = useState(() => useCallStore.getState().handsFree)
+  // Asked for by voice: call on its own after a short countdown, unless you cancel. A guessed contact waits for your OK.
+  const [auto, setAuto] = useState(() => useCallStore.getState().handsFree && !useCallStore.getState().pending?.who?.confirm)
+  const [confirmed, setConfirmed] = useState(false)
   if (!pending) return null
   const p = pending.plan
   const extras = [
@@ -392,10 +477,15 @@ function PlanView() {
     setAuto(false)
     setBusy(true)
     try { await startCall(pending) } catch (err) {
-      notify(err.message, 'error')
-      if (useCallStore.getState().handsFree) say(`The call didn't start. ${err.message}`)
+      if (useCallStore.getState().handsFree) showError(`The call didn’t start. ${err.message}`)
+      else notify(err.message, 'error')
     } finally { setBusy(false) }
   }
+  // Someone else than the voice request matched: plan the same call for them (the plan names who it's for).
+  const pickOther = (c) => setDraft({
+    mode: pending.mode, to: c.phone, goal: pending.goal, brief: withoutContact(pending.brief, pending.to),
+    language: pending.language, heard: pending.who?.heard, autoStart: true,
+  })
   return (
     <Card className="p-5">
       {auto && !busy && (
@@ -403,8 +493,25 @@ function PlanView() {
           <Countdown label={`Calling ${callWith(pending)}`} onDone={call} onCancel={() => setAuto(false)} />
         </div>
       )}
-      <p className="text-xs text-ink-3">Call plan · {callWith(pending)}</p>
-      <CallerIdPicker compact />
+      {/* The three things a call needs, each changeable right here: who it's from, who it's to, and what should happen. */}
+      <div className="space-y-4">
+        <CallerIdPicker compact />
+        <div>
+          <p className="text-xs font-medium text-ink-3 mb-1.5">Who to call</p>
+          <WhoToCall to={pending.to} heard={pending.who?.heard || ''} confirm={!!pending.who?.confirm && !confirmed} onPick={pickOther}
+            onConfirm={() => { setConfirmed(true); call() }} />
+        </div>
+        <div>
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <p className="text-xs font-medium text-ink-3">What should happen</p>
+            <Button size="sm" onClick={() => setDraft({ mode: pending.mode, to: pending.to, goal: pending.goal, brief: pending.brief, language: pending.language })}>
+              <Pencil size={14} />Edit
+            </Button>
+          </div>
+          <p className="text-sm text-ink whitespace-pre-line rounded-lg bg-surface-2 px-3.5 py-2.5 leading-relaxed">{callText(pending) || '—'}</p>
+        </div>
+      </div>
+      <p className="text-xs text-ink-3 mt-6">Call plan · {callWith(pending)}</p>
       <h2 className="text-lg font-semibold text-ink mt-1 leading-snug">{p.objective || 'Call plan'}</h2>
       <div className="mt-4 rounded-lg bg-surface-2 px-4 py-3">
         <p className="text-xs font-medium text-ink-3">{assistantName()} opens with</p>
@@ -430,12 +537,10 @@ function PlanView() {
       {p.likely_questions?.length > 0 && <Block title="If they ask"><Bullets items={p.likely_questions.map((x) => `${x.q} → ${x.a || 'Will ask you'}`)} /></Block>}
       {extras.length > 0 && <Block title="Also"><Bullets items={extras} /></Block>}
       <p className="text-xs text-ink-3 mt-5">A guide, not a script. {assistantName()} adapts to what they say and checks with you before anything outside it.</p>
-      <div className="flex gap-2 mt-5">
-        <Button variant="primary" onClick={call} disabled={busy} className="flex-[2] h-11">
-          {busy ? <Loader2 size={17} className="animate-spin" /> : <Phone size={17} />}Call now
-        </Button>
-        <Button onClick={() => setDraft({ mode: pending.mode, to: pending.to, goal: pending.goal, brief: pending.brief, language: pending.language })} className="flex-1 h-11">
-          <Pencil size={15} />Edit
+      {/* Always in reach while you read the plan: it stays above the tab bar (and clear of the assistant button). */}
+      <div className="sticky z-20 bottom-[calc(76px+env(safe-area-inset-bottom,0px))] md:bottom-4 -mx-5 mt-5 px-5 pr-[4.75rem] md:pr-5 py-3 bg-surface rounded-b-xl border-t border-line">
+        <Button variant="primary" onClick={call} disabled={busy || (!!pending.who?.confirm && !confirmed)} className="w-full h-12 shadow-pop">
+          {busy ? <Loader2 size={17} className="animate-spin" /> : <Phone size={17} />}Call {callWith(pending)} now
         </Button>
       </div>
     </Card>
@@ -1058,6 +1163,7 @@ export default function Calls({ onOpenSettings }) {
         </div>
       </header>
       {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
+      <ErrorDialog />
 
       <div ref={scroller} className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto w-full px-3 md:px-10 pb-36 md:pb-16">

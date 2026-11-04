@@ -34,6 +34,8 @@ function systemPrompt(owner = config.ownerName, assistant = config.assistantName
     `- call: they want a phone call made now ("call", "phone", "ring", "have ${assistant} call", "find out from"). Default mode is agent (${assistant} calls for ${owner}); use copilot only if they say they will talk themselves.`,
     '- both: e.g. a call to make later becomes a task with call details, or a call now plus a separate reminder.',
     '- A call they want made LATER (with a day or time) is kind "both": a task to make the call at that time, plus call details with when = "later".',
+    '- A request that starts with "call", "phone", "ring" or "dial" (speech-to-text may put a period right after it, like "Call. Ram…") is a call made NOW, kind "call", unless it also gives a day or time or says "remind me", "I need to" or "I have to". The rest of the sentence is who to call and what the call is about.',
+    '- It stays a call even when the name is garbled or not among their contacts: put the name as you best heard it in call.contact. Never turn a call request into a task just because the name is unclear.',
     'Rules:',
     '- Resolve relative dates and times ("tomorrow", "next Monday", "in 2 hours", "this evening" = 18:00, "morning" = 09:00 only if they asked for a reminder time) using the current date and time given.',
     '- Never invent phone numbers, names or facts. Leave fields empty when unknown.',
