@@ -39,6 +39,10 @@ export const DEFAULT_SETTINGS = {
   useSkills: true,
   // The assistant's voice on calls (a Deepgram voice id); empty = the calling server's default.
   callVoice: '',
+  // Which of the server's numbers calls show as coming from, and that number's digits, so a call can
+  // say what the other person will see and refuse to dial that same phone.
+  callFrom: '',
+  callFromNumber: '',
   callSkills: DEFAULT_SKILLS,
   // Empty means the phone's best voice for its language.
   voiceName: '',

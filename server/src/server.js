@@ -9,7 +9,7 @@ import { voiceAccessToken, createCall, hangupCall, toE164, twiml, streamParams, 
 import {
   broadcast,
   addUiClient, createSession, getSession, findByCallSid, publicView, setStatus, emit, finalize,
-  answerQuestion, runSuggestion, history, historyList, callRecord, slog, markVoicemail,
+  answerQuestion, runSuggestion, history, historyList, callRecord, slog, markVoicemail, callsSince,
 } from './sessions.js';
 import { handleListenStream, handleAgentStream, joinAgentCall } from './streams.js';
 import { generatePlan, normalizePlan, cleanSkills } from './planner.js';
@@ -80,8 +80,7 @@ function twilioRequestOk(req, params) {
 
 /** Calls started in the last 24h (live + saved), for the daily cost guard. */
 function callsInLastDay() {
-  const since = Date.now() - 24 * 60 * 60 * 1000;
-  return historyList().filter((h) => Date.parse(h.startedAt) > since).length;
+  return callsSince(24 * 60 * 60 * 1000);
 }
 const sendXml = (res, inner) => send(res, 200, twiml(inner), 'text/xml');
 
@@ -358,7 +357,11 @@ async function route(req, res) {
     body.goal = String(body.goal || '').slice(0, 2000);
     body.brief = String(body.brief || '').slice(0, 40000);
     if (mode === 'agent' && !body.goal?.trim()) return send(res, 400, { error: 'Tell the agent what the call is for' });
-    const s = createSession({ mode, to, from: fromNumber(body.from), goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', assistant: body.assistant });
+    const from = fromNumber(body.from);
+    if (toE164(from) === to) {
+      return send(res, 400, { error: 'That number is the one this call would show as coming from, so the carrier would send it straight to voicemail. Pick the other caller ID in Settings → Calling, or call a different phone.' });
+    }
+    const s = createSession({ mode, to, from, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', assistant: body.assistant });
     if (mode === 'agent') {
       logCallerId(s, to);
       try {

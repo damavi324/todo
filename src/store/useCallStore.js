@@ -1,7 +1,8 @@
 // App-wide call state. Lives outside the Calls screen so Pilot's questions reach you
 // on any screen, and a call keeps running while you look at your tasks.
 import { create } from 'zustand'
-import { cp, socketUrl, isCallPilotReady, assistantName, wakeServer, callerContext } from '../lib/callpilot'
+import { cp, socketUrl, isCallPilotReady, assistantName, wakeServer, callerContext, samePhone, rememberCallerId } from '../lib/callpilot'
+import { useTaskStore } from '../store/useTaskStore'
 import { archiveCall, archivedCall, mergeHistory, hasFinal, archivedList } from '../lib/callArchive'
 import CallSession from '../plugins/CallSession'
 import { contactFor } from '../lib/callFollowUps'
@@ -32,9 +33,19 @@ export function withoutContact(brief, to) {
 /** A saved contact's name and notes ride along as background, so the assistant knows who it's calling. */
 function withContact(body) {
   const contact = contactFor(body.to)
-  if (!contact || String(body.brief || '').includes(contact.name)) return body
-  const lines = [`Calling: ${contact.name}`, contact.notes && `About ${contact.name}: ${contact.notes}`, body.brief]
+  // The name is often already in the brief ("Calling: Pooja"). That must not drop the notes.
+  const own = withoutContact(body.brief, body.to).trim()
+  if (!contact) return { ...body, brief: own }
+  const lines = [`Calling: ${contact.name}`, contact.notes && `About ${contact.name}: ${contact.notes}`, own]
   return { ...body, brief: lines.filter(Boolean).join('\n') }
+}
+
+/** A question the assistant is still waiting on. Timed-out ones stay in the record with no answer. */
+function liveQuestion(call) {
+  const q = (call?.questions || []).find((item) => item.answer == null && !item.expired)
+  if (!q?.askedAt) return q || null
+  if (Date.now() - Date.parse(q.askedAt) > 95000) return null
+  return q
 }
 
 const initial = {
@@ -67,6 +78,8 @@ const initial = {
   phoneState: 'off', // off | starting | ready | error
   phoneError: '',
   handsFree: false, // started by voice: the plan calls on its own, questions and results are read aloud
+  awaitingSummary: null, // a finished call whose notes should still surface if you left the write-up
+  awaitingDraftVersion: 0,
 }
 
 export const useCallStore = create((set, get) => ({
@@ -105,6 +118,7 @@ export const useCallStore = create((set, get) => ({
       setTimeout(() => { if (!device && !devicePromise) get().ensurePhone().catch(() => {}) }, 2000)
       get().loadHistory()
       get().syncSession()
+      rememberCallerId().catch(() => {})
     }
     ws.onerror = () => { /* onclose follows and retries */ }
     ws.onmessage = (e) => {
@@ -148,6 +162,10 @@ export const useCallStore = create((set, get) => ({
     }
     const s = get().session
     if (!s || ev.sessionId !== s.id) {
+      if (ev.type === 'summary' && ev.sessionId && ev.sessionId === get().awaitingSummary) {
+        get().showParkedSummary(ev.sessionId, ev.summary)
+        return
+      }
       if (ev.type === 'status' || ev.type === 'summary' || ev.type === 'result') get().refreshHistorySoon()
       return
     }
@@ -186,7 +204,7 @@ export const useCallStore = create((set, get) => ({
         set({ agentState: { state: ev.state, detail: ev.detail } })
         break
       case 'summary':
-        set({ summary: ev.summary, view: 'summary' })
+        set({ summary: ev.summary, view: 'summary', awaitingSummary: null })
         if (get().handsFree) say(['The call is over.', ev.summary?.headline, ev.summary?.summary].filter(Boolean).join(' '))
         get().saveCallLocally(s.id)
         get().refreshHistorySoon()
@@ -240,13 +258,17 @@ export const useCallStore = create((set, get) => ({
   bindCall(call) {
     get()._call = call
     call.on('accept', () => { if (!get().startedAt) set({ startedAt: Date.now() }) })
-    call.on('disconnect', () => {
+    const lineDropped = () => {
       get()._call = null
       set({ onAudio: false })
-      if (get().session?.mode === 'copilot' || get().session?.joined) get().endLocal()
-    })
-    call.on('cancel', () => get().endLocal())
-    call.on('reject', () => get().endLocal())
+      if (get()._hanging) return
+      const session = get().session
+      const over = !session || get().status === 'ended' || BAD.has(get().status)
+      if (!over && (session.mode === 'copilot' || session.joined)) get().hangup()
+    }
+    call.on('disconnect', lineDropped)
+    call.on('cancel', lineDropped)
+    call.on('reject', lineDropped)
     call.on('error', (err) => {
       get().notify(`Call: ${err.message}`, 'error')
       get().report(`Call error ${err.code || ''}: ${err.message}${err.explanation ? ` (${err.explanation})` : ''}`, true)
@@ -286,7 +308,11 @@ export const useCallStore = create((set, get) => ({
   },
 
   async startCall(body) {
-    const fresh = { lines: [], partials: { you: '', them: '' }, suggestion: null, question: null, agentState: null, summary: null, startedAt: null, muted: false, onAudio: false, detail: null }
+    const from = useTaskStore.getState().settings.callFromNumber
+    if (samePhone(from, body.to)) {
+      throw new Error('That number is the one this call would show as coming from, so it would go straight to voicemail. Choose the other number in Settings → Calling, or call a different phone.')
+    }
+    const fresh = { lines: [], partials: { you: '', them: '' }, suggestion: null, question: null, agentState: null, summary: null, startedAt: null, muted: false, onAudio: false, detail: null, awaitingSummary: null }
     let session
     body = withContact(body)
     await get().ensureAwake()
@@ -314,12 +340,18 @@ export const useCallStore = create((set, get) => ({
   async answer(answer) {
     const { session, question } = get()
     if (!session || !question || !String(answer).trim()) return
+    const pending = question
     set({ question: null })
     CallSession.clearAlert().catch(() => {})
     try {
       await cp(`/api/sessions/${session.id}/answer`, { questionId: question.id, answer })
     } catch (err) {
-      get().notify(err.message, 'error')
+      const timedOut = err.status === 410
+      if (!timedOut && get().session?.id === session.id && !get().question) {
+        set({ question: pending })
+        CallSession.alert({ title: `${assistantName()} needs your answer`, text: pending.question }).catch(() => {})
+      }
+      get().notify(timedOut ? 'They couldn’t wait any longer, so the assistant is carrying on without that answer.' : err.message, 'error')
     }
   },
 
@@ -338,12 +370,20 @@ export const useCallStore = create((set, get) => ({
   },
 
   async hangup() {
+    if (get()._hanging) return
+    get()._hanging = true
     const { session } = get()
-    const call = get()._call
-    if (call) call.disconnect()
-    if (session) await cp(`/api/sessions/${session.id}/hangup`, {}).catch(() => {})
-    get().endLocal()
-    if (session) await get().syncSession({ hungUp: true })
+    try {
+      const call = get()._call
+      if (call) {
+        try { call.disconnect() } catch { /* already gone */ }
+      }
+      if (session) await cp(`/api/sessions/${session.id}/hangup`, {}).catch(() => {})
+      get().endLocal()
+      if (session) await get().syncSession({ hungUp: true })
+    } finally {
+      get()._hanging = false
+    }
   },
 
   /**
@@ -374,7 +414,8 @@ export const useCallStore = create((set, get) => ({
     }
     get().endLocal()
     archiveCall(call)
-    if (call.summary) set({ status: call.status, summary: call.summary, lines: call.transcript || get().lines, view: 'summary' })
+    if (call.summary) set({ status: call.status, summary: call.summary, lines: call.transcript || get().lines, view: 'summary', awaitingSummary: null })
+    else if (hungUp && get().view === 'active') set({ status: call.status || 'ended', lines: call.transcript || get().lines })
     else set({ status: call.status, detail: call, view: 'detail' })
     get().refreshHistorySoon()
     return true
@@ -400,7 +441,11 @@ export const useCallStore = create((set, get) => ({
 
   endLocal(detail) {
     if (detail) get().notify(detail, 'error')
-    set({ onAudio: false, joinPending: false, question: null })
+    const status = get().status
+    const patch = { onAudio: false, joinPending: false, question: null }
+    // Hang-up and a dropped line should leave the "writing the notes" screen, not a live call with dead buttons.
+    if (get().session && status !== 'ended' && !BAD.has(status)) patch.status = 'ended'
+    set(patch)
     CallSession.stop().catch(() => {})
   },
 
@@ -411,7 +456,71 @@ export const useCallStore = create((set, get) => ({
   },
 
   newCall() {
-    set({ view: 'compose', session: null, status: null, summary: null, pending: null, detail: null, handsFree: false })
+    set({ view: 'compose', session: null, status: null, summary: null, pending: null, detail: null, handsFree: false, question: null, agentState: null })
+  },
+
+  /**
+   * Leave the "writing the notes" screen without throwing the notes away. When they arrive, they open
+   * here if you're still on an empty call form, and otherwise a toast offers them.
+   */
+  dismissWriteup() {
+    const id = get().session?.id
+    if (!id) return get().newCall()
+    set({
+      awaitingSummary: id,
+      awaitingDraftVersion: get().draftVersion,
+      view: 'compose',
+      session: null,
+      status: null,
+      summary: null,
+      pending: null,
+      detail: null,
+      handsFree: false,
+      question: null,
+      agentState: null,
+    })
+  },
+
+  showParkedSummary(id, summary) {
+    get().saveCallLocally(id)
+    const stillWaiting = !get().session && get().view === 'compose' && get().draftVersion === get().awaitingDraftVersion && !get().pending
+    set({ awaitingSummary: null })
+    if (stillWaiting) {
+      get().openSavedSummary(id, summary, true)
+      return
+    }
+    get().notify('Your last call’s notes are ready', 'info', {
+      label: 'View',
+      run: () => {
+        const live = get().session && get().view === 'active' && get().status !== 'ended' && !BAD.has(get().status)
+        if (live) return
+        get().openSavedSummary(id, summary)
+      },
+    })
+  },
+
+  async openSavedSummary(id, summary, onlyIfIdle = false) {
+    let call = archivedCall(id)
+    try { call = (await cp(`/api/sessions/${id}`)).call } catch { /* the phone's copy is enough */ }
+    if (!call) return
+    if (summary) call = { ...call, summary }
+    archiveCall(call)
+    if (onlyIfIdle && (get().session || get().view !== 'compose' || get().awaitingDraftVersion === -1 || get().pending)) {
+      get().notify('Your last call’s notes are ready', 'info', { label: 'View', run: () => get().openSavedSummary(id, summary) })
+      return
+    }
+    useTaskStore.getState().setAppView('calls')
+    set({
+      session: call,
+      summary: call.summary || null,
+      status: call.status,
+      lines: call.transcript || [],
+      view: call.summary ? 'summary' : 'detail',
+      detail: call.summary ? null : call,
+      partials: { you: '', them: '' },
+      question: null,
+      handsFree: false,
+    })
   },
 
   // ---------- history, details, logs ----------
@@ -461,9 +570,10 @@ export const useCallStore = create((set, get) => ({
       // App was closed mid-call: pick the live call back up.
       set({
         session: call, status: call.status, view: 'active', lines: call.transcript || [], partials: { you: '', them: '' },
-        suggestion: call.suggestions?.at(-1) || null, question: (call.questions || []).find((q) => q.answer == null) || null,
+        suggestion: call.suggestions?.at(-1) || null, question: liveQuestion(call),
         summary: null, startedAt: Date.parse(call.startedAt) || Date.now(), onAudio: false, detail: null,
       })
+      useTaskStore.getState().setAppView('calls')
       if (call.mode === 'agent') CallSession.start({ mode: 'monitor', title: `${assistantName()} is on a call`, text: 'Tap to follow along' }).catch(() => {})
       return
     }

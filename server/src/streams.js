@@ -423,7 +423,8 @@ export async function joinAgentCall(s) {
   if (!s.callSid) throw new Error('Call is not connected yet');
   s._agent?.say(`One moment, I'm connecting ${s.ownerName || config.ownerName} to the call now.`);
   emit(s, 'agent_state', { state: 'handing_off' });
-  await new Promise((r) => setTimeout(r, 3500));
+  // Long enough for that sentence to finish. Cutting the audio sooner leaves them mid-word as you join.
+  await new Promise((r) => setTimeout(r, 5500));
   s.joined = true;
   const inner =
     `<Start><Stream url="${xml(publicWss('/streams/listen'))}" track="both_tracks">` +

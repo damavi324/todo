@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import WebSocket from 'ws';
 import { config, assistantNameOf } from './config.js';
 import { complete, parseJson } from './claude.js';
+import { hangupCall } from './twilio.js';
 
 // ---------- Live UI hub ----------
 const uiClients = new Set();
@@ -78,6 +79,20 @@ export function historyList() {
       result: h.endedAt ? h.result || callResult(h) : 'live',
       hasPlan: !!h.plan, briefChars: (h.brief || '').length, usage: h.usage || null,
     }));
+}
+
+/** How many calls started in the last `ms` milliseconds. Counts the full history, not the short list the app shows. */
+export function callsSince(ms) {
+  const since = Date.now() - ms;
+  const seen = new Set();
+  let n = 0;
+  const count = (c) => {
+    if (!c?.id || seen.has(c.id)) return;
+    if (Date.parse(c.startedAt) > since) { seen.add(c.id); n += 1; }
+  };
+  for (const s of sessions.values()) count(s);
+  for (const h of loadHistory()) count(h);
+  return n;
 }
 
 /** Full record of one call (live or saved). */
@@ -166,7 +181,8 @@ setInterval(() => {
   for (const s of sessions.values()) {
     const age = now - Date.parse(s.startedAt);
     if (!s._finalized && age > maxMs) {
-      slog(s, 'warn', `No final status from Twilio after ${Math.round(age / 60000)} minutes; closing the call record.`);
+      slog(s, 'warn', `No final status from Twilio after ${Math.round(age / 60000)} minutes; hanging up.`);
+      if (s.callSid) hangupCall(s.callSid).catch((err) => slog(s, 'error', `Could not hang up: ${err.message}`));
       finalize(s, 'timed out');
     } else if (s._finalized && s.endedAt && now - Date.parse(s.endedAt) > 10 * 60 * 1000) {
       sessions.delete(s.id);
@@ -312,6 +328,7 @@ export function askOwner(s, question, timeoutMs = 45000) {
     const timer = setTimeout(() => {
       s._pendingAnswers.delete(qid);
       q.answer = null;
+      q.expired = true;
       emit(s, 'question_closed', { questionId: qid, answered: false });
       resolve(null);
     }, timeoutMs);

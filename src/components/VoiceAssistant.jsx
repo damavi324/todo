@@ -31,6 +31,13 @@ function describeDue(t) {
 const taskWithCall = (r) => ({ ...r.task, listId: r.task.listId || undefined, call: r.call ? { to: r.call.to, contact: r.call.contact, goal: r.call.goal, details: r.call.details, mode: r.call.mode } : undefined })
 const callDraft = (r) => ({ mode: r.call.mode, to: r.call.to || r.call.contact || '', goal: r.call.goal || (r.call.contact ? `Call ${r.call.contact}` : ''), brief: [r.call.contact && `Calling: ${r.call.contact}`, r.call.details].filter(Boolean).join('\n') })
 
+/** A request to place a call, rather than a reminder that happens to mention calling. */
+function wantsACallNow(text) {
+  const t = String(text || '').trim()
+  if (/^\s*(remind|remember|don'?t forget|add|todo|to-do)\b/i.test(t)) return false
+  return /\b(call|phone|ring|dial)\b/i.test(t)
+}
+
 /**
  * The assistant, from anywhere in the app: speak or type in the same box.
  * Claude (on the calling server) decides whether it is a task, a call for Pilot, or both; a call you said out loud
@@ -75,21 +82,33 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall: hand
       // The name it heard, matched to a saved or phone contact, gives the number. If that name was garbled,
       // look for a contact's name anywhere in what you said.
       if (r.call && !r.call.to) {
-        const who = (r.call.contact && pickByName(people, r.call.contact)) || pickByName(people, heard, { inSpeech: true })
-        if (who) r.call = { ...r.call, to: who.phone, contact: who.name }
+        const named = r.call.contact && pickByName(people, r.call.contact)
+        const who = named || pickByName(people, heard, { inSpeech: true })
+        if (who) {
+          // A fuzzy match (Kesar → Keshab) must be confirmed. An exact name can dial on its own.
+          const said = (r.call.contact || '').trim().toLowerCase()
+          r.call = { ...r.call, to: who.phone, contact: who.name, confirmWho: who.name.trim().toLowerCase() !== said }
+        }
       }
       recordOtherUsage('assistant', usage)
       // Single, clear intent: go straight to it.
       if (r.kind === 'task' && r.task) return onTask({ ...r.task, listId: r.task.listId || undefined })
       // A call you said out loud, with who and why: plan it and dial, hands-free (cancel stays one tap away).
-      if (spoken && r.kind === 'call' && r.call && r.call.when !== 'later' && r.call.to && r.call.goal) {
+      // A guessed contact stops here so you can see the name before anyone is dialed.
+      if (spoken && r.kind === 'call' && r.call && r.call.when !== 'later' && r.call.to && r.call.goal && !r.call.confirmWho) {
         return onCall({ ...callDraft(r), autoStart: true })
       }
       setResult(r)
       setPhase('result')
     } catch (e) {
       setWaking(false)
-      // Server hiccup: still save the words as a task with the local parser.
+      // A call that couldn't be placed must not quietly become a to-do.
+      if (wantsACallNow(heard)) {
+        setError(e.message || 'The calling server didn’t answer. Try the call again in a moment.')
+        setPhase('error')
+        return
+      }
+      // Server hiccup on a reminder: still save the words as a task with the local parser.
       try {
         const task = await parseSpokenTask(heard)
         onTask({ ...task, parseWarning: e.message })
@@ -262,7 +281,8 @@ export default function VoiceAssistant({ onClose, onTask: handTask, onCall: hand
                 <p className="font-medium text-ink mt-0.5">{result.call.contact || formatNumber(result.call.to) || 'Who to call?'}</p>
                 {result.call.goal && <p className="text-sm text-ink-2 mt-0.5">{result.call.goal}</p>}
                 {!result.call.to && <p className="text-xs text-warn mt-1">No number heard. You can add it on the next screen.</p>}
-                <button onClick={() => onCall(callDraft(result))} className="mt-3 w-full flex items-center justify-center gap-2 rounded-lg bg-accent text-white font-medium h-10">
+                {result.call.confirmWho && <p className="text-xs text-warn mt-1">Matched to {result.call.contact}. Check that this is the right person before the call starts.</p>}
+                <button onClick={() => onCall({ ...callDraft(result), autoStart: !!result.call.to && !!result.call.goal })} className="mt-3 w-full flex items-center justify-center gap-2 rounded-lg bg-accent text-white font-medium h-10">
                   <Phone size={16} />{result.call.mode === 'copilot' ? 'Set up my call' : `Have ${assistantName()} call ${result.call.when === 'later' ? 'now' : ''}`.trim()}
                 </button>
               </div>

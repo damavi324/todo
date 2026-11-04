@@ -83,7 +83,7 @@ export function normalize(r, spoken, lists = []) {
       title: s(t.title, 200) || spoken.slice(0, 120),
       notes: s(t.notes, 2000),
       dueDate: /^\d{4}-\d{2}-\d{2}$/.test(t.dueDate || '') ? t.dueDate : '',
-      dueTime: /^\d{2}:\d{2}$/.test(t.dueTime || '') ? t.dueTime : '',
+      dueTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(t.dueTime || '') ? t.dueTime : '',
       priority: ['none', 'low', 'medium', 'high'].includes(t.priority) ? t.priority : 'none',
       listId: listIds.has(t.listId) ? t.listId : '',
     };

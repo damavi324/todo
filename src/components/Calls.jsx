@@ -8,7 +8,7 @@ import UsagePanel from './UsagePanel'
 import { useCallStore, statusText, isBadStatus, withoutContact } from '../store/useCallStore'
 import { callResult } from '../lib/callArchive'
 import { useTaskStore } from '../store/useTaskStore'
-import { formatNumber, assistantName, ownerName, isCallPilotReady } from '../lib/callpilot'
+import { formatNumber, assistantName, ownerName, isCallPilotReady, samePhone } from '../lib/callpilot'
 import { startDictation, listenUntilPause } from '../lib/dictation'
 import { say } from '../lib/notifications'
 import { loadPhoneContacts, phoneContacts, mergeContacts, pickByName, searchContacts } from '../lib/phoneContacts'
@@ -149,6 +149,21 @@ function openingLine(p) {
   return `Hi, I’m calling on behalf of ${ownerName()}${why}.`
 }
 
+/** The line that follows, matching the server: skipped when the opening already said it. */
+function introLine(p) {
+  const g = openingLine(p)
+  const parts = []
+  if (!/\bAI\b/.test(g)) parts.push(`This is ${assistantName()}, an AI assistant for ${ownerName()}.`)
+  if (!/transcrib/i.test(g)) parts.push('Just so you know, this call is being transcribed.')
+  return parts.join(' ')
+}
+
+function TheySee() {
+  const number = useTaskStore((s) => s.settings.callFromNumber)
+  if (!number) return null
+  return <p className="text-xs text-ink-3 mt-1">The other person sees {formatNumber(number)}</p>
+}
+
 /** The form starts from the draft it was opened with (a redial, a task's call); the screen remounts it per draft. */
 function Compose() {
   const { makePlan, startCall, notify, phoneState } = useCallStore()
@@ -191,12 +206,25 @@ function Compose() {
     return pickByName(everyone, value)?.phone || value
   }
 
+  // Typing a new call means the previous call's notes should arrive as a toast, not replace this form.
+  const keepDraft = () => {
+    const s = useCallStore.getState()
+    if (s.awaitingSummary && s.awaitingDraftVersion === s.draftVersion) useCallStore.setState({ awaitingDraftVersion: -1 })
+  }
+
   const go = async (fields, { handsFree = false } = {}) => {
     setError('')
     const note = fields.text.trim()
     const number = resolveTo(fields.to)
     if (/[a-z]/i.test(number)) {
       const msg = `I couldn’t match “${fields.to.trim()}” to one contact. Pick them from the list, or type the number.`
+      setError(msg)
+      if (handsFree) say(msg)
+      return
+    }
+    const from = useTaskStore.getState().settings.callFromNumber
+    if (samePhone(from, number)) {
+      const msg = 'That number is the one this call would show as coming from, so it would go straight to voicemail. Choose the other number in Settings → Calling, or call a different phone.'
       setError(msg)
       if (handsFree) say(msg)
       return
@@ -264,7 +292,7 @@ function Compose() {
           <span className="block text-sm font-medium text-ink mb-1.5">Who to call</span>
           {/* A full keyboard, not the number pad, so you can search contacts by name. */}
           <input type="text" autoComplete="off" autoCorrect="off" autoCapitalize="words" spellCheck={false} value={to} required
-            onChange={(e) => { setTo(e.target.value); setPicking(true) }}
+            onChange={(e) => { keepDraft(); setTo(e.target.value); setPicking(true) }}
             onFocus={(e) => {
               setPicking(true)
               // Phones: bring the field to the top, so its suggestions aren't hidden under the keyboard.
@@ -274,7 +302,8 @@ function Compose() {
             onBlur={() => setTimeout(() => setPicking(false), 150)}
             placeholder={everyone.length ? 'Search contacts, or type a number' : '(214) 555-0123'}
             enterKeyHint="next" className={`${fieldClass} w-full h-11 text-base tabular-nums scroll-mt-4`} />
-          {contact && <p className="text-xs text-ink-3 mt-1.5 px-1">{contact.name}{contact.notes ? ' · their notes are included' : ''}</p>}
+          {contact && <p className="text-xs text-ink-3 mt-1.5 px-1">{contact.name}{contact.notes ? ' · their notes go with the call' : ''}</p>}
+          <TheySee />
           {matches.length > 0 && (
             <div className="absolute z-10 inset-x-0 mt-1 bg-surface rounded-lg shadow-pop py-1 max-h-80 overflow-y-auto">
               {matches.map((c) => (
@@ -293,7 +322,7 @@ function Compose() {
 
         <DictationField
           label={mode === 'agent' ? 'What should happen' : 'Notes for the assistant'}
-          value={text} onChange={setText} rows={4} maxLength={8000}
+          value={text} onChange={(v) => { keepDraft(); setText(v) }} rows={4} maxLength={8000}
           placeholder={mode === 'agent'
             ? 'e.g. Move my cleaning to a weekday morning next week. Fine with 8–11am. Don’t agree to any fee.'
             : 'Optional: what you want out of the call, so the suggestions are useful.'}
@@ -340,11 +369,12 @@ function PlanView() {
         </div>
       )}
       <p className="text-xs text-ink-3">Call plan · {callWith(pending)}</p>
+      <TheySee />
       <h2 className="text-lg font-semibold text-ink mt-1 leading-snug">{p.objective || 'Call plan'}</h2>
       <div className="mt-4 rounded-lg bg-surface-2 px-4 py-3">
         <p className="text-xs font-medium text-ink-3">{assistantName()} opens with</p>
         <p className="text-sm text-ink mt-1 leading-relaxed">“{openingLine(p)}”</p>
-        <p className="text-xs text-ink-3 mt-1.5">Then: “This is {assistantName()}, an AI assistant for {ownerName()}. Just so you know, this call is being transcribed.”</p>
+        {introLine(p) && <p className="text-xs text-ink-3 mt-1.5">Then: “{introLine(p)}”</p>}
       </div>
       {p.missing_info?.length > 0 && (
         <Note tone="warn" className="mt-4">
@@ -442,7 +472,7 @@ function QuestionCard({ question, answer }) {
   return (
     <form onSubmit={(e) => { e.preventDefault(); send(text) }} className="rounded-xl border-2 border-accent bg-surface shadow-pop p-4 space-y-3">
       <p className="flex items-center gap-2 text-xs font-semibold text-accent">
-        <MessageCircleQuestion size={15} />{assistantName()} needs your answer · they’re on hold
+        <MessageCircleQuestion size={15} />{assistantName()} needs your answer · they’re holding for about a minute
       </p>
       <p className="text-[15px] font-medium text-ink leading-snug">{question.question}</p>
       {/* Hands-free: no keyboard popping up over the Speak button. */}
@@ -497,6 +527,7 @@ function ActiveCall() {
         </div>
         <p className="text-2xl font-semibold tracking-tight text-ink mt-3">{callWith(session)}</p>
         {contactFor(session.to) && <p className="text-sm text-ink-3 tabular-nums">{formatNumber(session.to)}</p>}
+        <TheySee />
         {session.goal && <p className="text-sm text-ink-2 mt-1.5 line-clamp-2">{session.goal}</p>}
         {state && <p className="mt-4 text-sm text-ink-2 flex items-center gap-2"><Bot size={15} className="text-accent" />{state}</p>}
         {!ended && (
@@ -516,13 +547,13 @@ function ActiveCall() {
             </div>
           )
         )}
-        {/* The notes usually replace this screen a few seconds after hang-up. If they never come
-            (server asleep, connection lost), don't leave the finished call stuck here. */}
+        {/* The notes replace this screen once they're ready. Leaving early keeps them: they open
+            on their own, or a toast offers them if you've already moved on. */}
         {ended && (
           <div className="flex items-center gap-3 mt-5">
             <Loader2 size={15} className="animate-spin text-ink-3" />
-            <span className="flex-1 text-sm text-ink-3">Writing up the call…</span>
-            <Button variant="primary" size="sm" onClick={s.newCall}>Done</Button>
+            <span className="flex-1 text-sm text-ink-3">Writing the notes. They’ll show here in a moment.</span>
+            <button type="button" onClick={s.dismissWriteup} className="text-sm text-ink-3 hover:text-ink">Not now</button>
           </div>
         )}
         {keypad && !agentMode && !ended && (

@@ -579,7 +579,12 @@ try {
   assert.ok(r.json.call.log.some((l) => /Created AI agent call/.test(l.text)));
   pass('Each call keeps its number, goal, full details and plan, ready to redial');
 
-  r = await req('/api/sessions', { method: 'POST', body: { mode: 'copilot', to: '2145550111', goal: 'Test failure', brief: 'Some details' } });
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'copilot', to: '+12145550111', goal: 'Call myself' } });
+  assert.equal(r.status, 400);
+  assert.match(r.json.error, /voicemail/);
+  pass('Refuses to dial the number the call would show as coming from');
+
+  r = await req('/api/sessions', { method: 'POST', body: { mode: 'copilot', to: '2145550188', goal: 'Test failure', brief: 'Some details' } });
   const fail = r.json.session;
   r = await req(`/api/sessions/${fail.id}/client-error`, { method: 'POST', body: { message: 'Call error 31005: Connection error', fatal: true } });
   assert.equal(r.status, 200);

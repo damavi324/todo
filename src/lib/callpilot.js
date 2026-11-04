@@ -179,3 +179,23 @@ export function formatNumber(e164) {
   const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(e164 || '')
   return m ? `(${m[1]}) ${m[2]}-${m[3]}` : e164 || ''
 }
+
+/** The same phone, ignoring formatting. Used to stop a call to the number it shows as coming from. */
+export function samePhone(a, b) {
+  const da = String(a || '').replace(/\D/g, '').slice(-10)
+  const db = String(b || '').replace(/\D/g, '').slice(-10)
+  return da.length >= 7 && da === db
+}
+
+/** Remember which number calls show as coming from, so the call screen can say so before Settings is opened. */
+export async function rememberCallerId() {
+  const list = await cp('/api/caller-ids', undefined, { timeoutMs: 20000 })
+  const current = useTaskStore.getState().settings
+  const chosen = list.numbers?.some((n) => n.key === current.callFrom) ? current.callFrom : (list.default || list.numbers?.[0]?.key || '')
+  const num = list.numbers?.find((n) => n.key === chosen)?.number || ''
+  const patch = {}
+  if (chosen && chosen !== current.callFrom) patch.callFrom = chosen
+  if (num && num !== current.callFromNumber) patch.callFromNumber = num
+  if (Object.keys(patch).length) useTaskStore.getState().updateSettings(patch)
+  return list
+}
