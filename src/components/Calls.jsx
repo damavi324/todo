@@ -490,11 +490,14 @@ function PlanView() {
     p.if_voicemail && `Voicemail: “${p.if_voicemail}”`,
     p.confirm_before_hanging_up?.length && `Reads back before hanging up: ${p.confirm_before_hanging_up.join(', ')}`,
   ].filter(Boolean)
+  // Voicemail: off unless the plan says you asked for one; changeable here and during the call.
+  const leaveVoicemail = pending.leaveVoicemail ?? !!p.leave_voicemail
   const call = async () => {
     setAuto(false)
     setBusy(true)
-    try { await startCall(pending) } catch (err) {
-      if (useCallStore.getState().handsFree) showError(`The call didn’t start. ${err.message}`, { call: pending, retry: call })
+    const placing = { ...pending, leaveVoicemail }
+    try { await startCall(placing) } catch (err) {
+      if (useCallStore.getState().handsFree) showError(`The call didn’t start. ${err.message}`, { call: placing, retry: call })
       else notify(err.message, 'error')
     } finally { setBusy(false) }
   }
@@ -527,6 +530,10 @@ function PlanView() {
           </div>
           <p className="text-sm text-ink whitespace-pre-line rounded-lg bg-surface-2 px-3.5 py-2.5 leading-relaxed">{callText(pending) || '—'}</p>
         </div>
+        {pending.mode === 'agent' && (
+          <VoicemailChoice checked={leaveVoicemail} message={p.if_voicemail}
+            onChange={(v) => useCallStore.setState({ pending: { ...pending, leaveVoicemail: v } })} />
+        )}
       </div>
       <p className="text-xs text-ink-3 mt-6">Call plan · {callWith(pending)}</p>
       <h2 className="text-lg font-semibold text-ink mt-1 leading-snug">{p.objective || 'Call plan'}</h2>
@@ -554,13 +561,39 @@ function PlanView() {
       {p.likely_questions?.length > 0 && <Block title="If they ask"><Bullets items={p.likely_questions.map((x) => `${x.q} → ${x.a || 'Will ask you'}`)} /></Block>}
       {extras.length > 0 && <Block title="Also"><Bullets items={extras} /></Block>}
       <p className="text-xs text-ink-3 mt-5">A guide, not a script. {assistantName()} adapts to what they say and checks with you before anything outside it.</p>
-      {/* Always in reach while you read the plan: it stays above the tab bar (and clear of the assistant button). */}
-      <div className="sticky z-20 bottom-[calc(76px+env(safe-area-inset-bottom,0px))] md:bottom-4 -mx-5 mt-5 px-5 pr-[4.75rem] md:pr-5 py-3 bg-surface rounded-b-xl border-t border-line">
-        <Button variant="primary" onClick={call} disabled={busy || (!!pending.who?.confirm && !confirmed)} className="w-full h-12 shadow-pop">
-          {busy ? <Loader2 size={17} className="animate-spin" /> : <Phone size={17} />}Call {callWith(pending)} now
+      {/* Always in reach while you read the plan. Phones: one solid footer docked on the tab bar, with the Call
+          button and the assistant's microphone; the plan scrolls underneath it. Wider screens: sticky in the card. */}
+      <div className="fixed md:sticky inset-x-0 md:inset-x-auto z-30 bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] md:bottom-4 md:-mx-5 md:mt-5 flex items-center gap-3 px-4 md:px-5 py-3 bg-surface border-t border-line md:rounded-b-xl">
+        <Button variant="primary" onClick={call} disabled={busy || (!!pending.who?.confirm && !confirmed)} className="flex-1 h-12 min-w-0">
+          {busy ? <Loader2 size={17} className="animate-spin" /> : <Phone size={17} />}<span className="truncate">Call {callWith(pending)} now</span>
         </Button>
+        <button type="button" onClick={() => window.dispatchEvent(new Event('open-assistant'))} aria-label="Ask the assistant: speak or type"
+          className="md:hidden w-12 h-12 rounded-full bg-surface-2 flex items-center justify-center text-accent flex-shrink-0 active:scale-95 transition-transform">
+          <Mic size={20} />
+        </button>
       </div>
     </Card>
+  )
+}
+
+/**
+ * "Leave a voicemail if a machine answers": off unless you asked for one when planning. The message is already
+ * written in the plan, so turning it on costs nothing extra. On a live call it can change until a machine has
+ * answered; from then on it is locked, because the assistant may already be speaking (or have hung up).
+ */
+function VoicemailChoice({ checked, message, onChange, locked, busy }) {
+  return (
+    <label className={`flex items-start gap-3 rounded-lg border border-line px-3.5 py-3 ${locked ? 'opacity-70' : 'cursor-pointer'}`}>
+      <input type="checkbox" className="mt-0.5 w-5 h-5 accent-[rgb(var(--accent))] flex-shrink-0" checked={!!checked} disabled={locked || busy}
+        onChange={(e) => onChange(e.target.checked)} />
+      <span className="flex-1 min-w-0">
+        <span className="block text-sm font-medium text-ink">Leave a voicemail if no one answers</span>
+        <span className="block text-xs text-ink-3 mt-0.5">
+          {locked || (checked ? (message ? `It will say: “${message}”` : 'It will leave a short message saying who it is and why it called.') : 'Off: if voicemail picks up, the assistant hangs up without a message.')}
+        </span>
+      </span>
+      {busy && <Loader2 size={15} className="animate-spin text-ink-3 mt-0.5" />}
+    </label>
   )
 }
 
@@ -699,6 +732,12 @@ function ActiveCall() {
         {from && <p className="text-xs text-ink-3 mt-1">The other person sees {formatNumber(from)}</p>}
         {session.goal && <p className="text-sm text-ink-2 mt-1.5 line-clamp-2">{session.goal}</p>}
         {state && <p className="mt-4 text-sm text-ink-2 flex items-center gap-2"><Bot size={15} className="text-accent" />{state}</p>}
+        {session.mode === 'agent' && !ended && (
+          <div className="mt-4">
+            <VoicemailChoice checked={session.leaveVoicemail} message={session.plan?.if_voicemail} busy={s.voicemailBusy} onChange={s.setLeaveVoicemail}
+              locked={session.voicemail ? (session.leaveVoicemail ? 'Voicemail picked up: leaving the message now.' : 'Voicemail picked up: hanging up without a message.') : ''} />
+          </div>
+        )}
         {!ended && (
           agentMode ? (
             <div className="flex gap-2 mt-5">

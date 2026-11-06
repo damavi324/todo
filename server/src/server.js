@@ -9,7 +9,7 @@ import { voiceAccessToken, createCall, hangupCall, toE164, twiml, streamParams, 
 import {
   broadcast,
   addUiClient, createSession, getSession, findByCallSid, publicView, setStatus, emit, finalize,
-  answerQuestion, runSuggestion, history, historyList, callRecord, slog, markVoicemail, callsSince,
+  answerQuestion, runSuggestion, history, historyList, callRecord, slog, markVoicemail, setLeaveVoicemail, callsSince,
 } from './sessions.js';
 import { handleListenStream, handleAgentStream, joinAgentCall } from './streams.js';
 import { generatePlan, normalizePlan, cleanSkills } from './planner.js';
@@ -402,7 +402,7 @@ async function route(req, res) {
     // Only the AI agent speaks a language; a call you make yourself is always transcribed in English.
     const language = mode === 'agent' ? cleanLanguage(body.language) : 'en';
     if (languageProblem(language)) return send(res, 400, { error: languageProblem(language) });
-    const s = createSession({ mode, to, from, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', speed: body.speed, assistant: body.assistant, language, thinking: body.thinking });
+    const s = createSession({ mode, to, from, goal: body.goal, brief: body.brief, owner: body.owner, about: body.about, localNow: body.localNow, plan: mode === 'agent' ? normalizePlan(body.plan) : null, skills: mode === 'agent' ? cleanSkills(body.skills) : [], planUsage: body.planUsage, voice: voiceById(body.voice)?.id || '', speed: body.speed, assistant: body.assistant, language, thinking: body.thinking, leaveVoicemail: body.leaveVoicemail === true });
     if (mode === 'agent') {
       logCallerId(s, to);
       try {
@@ -433,7 +433,7 @@ async function route(req, res) {
     return send(res, 200, { session: publicView(s) });
   }
 
-  const m = p.match(/^\/api\/sessions\/([0-9a-f-]+)\/(join|hangup|answer|suggest|client-error)$/);
+  const m = p.match(/^\/api\/sessions\/([0-9a-f-]+)\/(join|hangup|answer|suggest|client-error|voicemail)$/);
   if (m && method === 'POST') {
     const s = getSession(m[1]);
     if (!s) return send(res, 404, { error: 'Call not found' });
@@ -462,6 +462,10 @@ async function route(req, res) {
           finalize(s, 'failed');
         }
         return send(res, 200, { ok: true });
+      }
+      if (m[2] === 'voicemail') {
+        const problem = setLeaveVoicemail(s, body.leave === true);
+        return send(res, problem ? 409 : 200, problem ? { error: problem, leaveVoicemail: s.leaveVoicemail, voicemail: !!s.voicemail } : { ok: true, leaveVoicemail: s.leaveVoicemail });
       }
       if (m[2] === 'suggest') {
         runSuggestion(s);

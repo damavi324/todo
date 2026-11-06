@@ -157,6 +157,13 @@ export default function App() {
   const showCalls = appView === 'calls'
   // Hidden while typing, and during a live call, where it would cover the call controls.
   const showFab = !keyboardOpen && !(showCalls && callView === 'active')
+  // On phones the call plan has its own footer (Call + microphone) above the tab bar, so the floating one steps aside.
+  const fabInFooter = showCalls && callView === 'plan'
+  useEffect(() => {
+    const open = () => setVoiceOpen(true)
+    window.addEventListener('open-assistant', open)
+    return () => window.removeEventListener('open-assistant', open)
+  }, [])
 
   return (
     <div className="flex h-dvh bg-bg text-ink overflow-hidden">
@@ -195,7 +202,7 @@ export default function App() {
 
         {/* The assistant, on every screen (speak or type); on phones, above the tab bar with + on task screens. */}
         {showFab && (
-          <div className="fixed right-4 bottom-[calc(84px+env(safe-area-inset-bottom,0px))] md:right-6 md:bottom-6 z-30 flex flex-col items-center gap-3">
+          <div className={`fixed right-4 bottom-[calc(84px+env(safe-area-inset-bottom,0px))] md:right-6 md:bottom-6 z-30 flex-col items-center gap-3 ${fabInFooter ? 'hidden md:flex' : 'flex'}`}>
             <button
               type="button"
               onClick={() => { setVoiceText(''); setVoiceOpen(true) }}
