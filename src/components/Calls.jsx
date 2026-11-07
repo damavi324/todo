@@ -14,6 +14,7 @@ import { startDictation, listenUntilPause } from '../lib/dictation'
 import { say } from '../lib/notifications'
 import { canTalk, converse, askAssistant, sentence, useVoiceChat } from '../lib/voiceChat'
 import { loadPhoneContacts, phoneContacts, mergeContacts, pickByName, searchContacts, likelyContacts } from '../lib/phoneContacts'
+import { rememberAlias } from '../lib/contactAliases'
 import { formatDue } from '../lib/dates'
 import { addAppointment, addFollowUp, callWith, contactFor, scheduleCallback, callbackTime } from '../lib/callFollowUps'
 import { Button, IconButton, Note, Segmented, Sheet, fieldClass } from './ui'
@@ -165,12 +166,15 @@ function ErrorDialog() {
  * contacts that sound like the name you said (US numbers only), and the search starts from that name, so
  * nothing has to be retyped. With confirm, the match was a guess: nothing dials until you choose.
  */
-function WhoToCall({ to, heard, confirm, onPick, onConfirm }) {
+function WhoToCall({ to, heard, confirm, onPick: pick, onConfirm: confirmed }) {
   const contacts = useTaskStore((s) => s.contacts)
   const [open, setOpen] = useState(!!confirm)
   const [query, setQuery] = useState(heard || '')
   const everyone = mergeContacts(contacts, phoneContacts())
   const current = contactFor(to)
+  // Picking or confirming who a misheard name meant teaches voice mode that name for next time.
+  const onPick = (c) => { if (heard) rememberAlias(heard, c.name); pick(c) }
+  const onConfirm = () => { if (heard && current?.name) rememberAlias(heard, current.name); confirmed() }
   const sounds = new Set(likelyContacts(everyone, heard || ''))
   const q = query.trim()
   const found = q ? searchContacts(everyone, q, 8) : []

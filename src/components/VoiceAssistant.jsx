@@ -10,7 +10,8 @@ import { PRIORITY_COLOR } from '../lib/views'
 import { useCallStore } from '../store/useCallStore'
 import SpeechCapture from '../plugins/SpeechCapture'
 import { useBack } from '../lib/backStack'
-import { mergeContacts, phoneContacts, loadPhoneContacts, pickByName, likelyContacts } from '../lib/phoneContacts'
+import { mergeContacts, phoneContacts, loadPhoneContacts, pickByName, likelyContacts, contactNames, honorificTwin, heardKey } from '../lib/phoneContacts'
+import { aliasFor, aliasLines, rememberAlias } from '../lib/contactAliases'
 import { canTalk, converse, cancelConversation, sentence, useVoiceChat } from '../lib/voiceChat'
 
 
@@ -31,6 +32,25 @@ function describeDue(t) {
 // What a result turns into: a task (with any call attached), or a draft for the call form.
 const taskWithCall = (r) => ({ ...r.task, listId: r.task.listId || undefined, call: r.call ? { to: r.call.to, contact: r.call.contact, goal: r.call.goal, details: r.call.details, mode: r.call.mode } : undefined })
 const callDraft = (r) => ({ mode: r.call.mode, to: r.call.to || r.call.contact || '', goal: r.call.goal || (r.call.contact ? `Call ${r.call.contact}` : ''), brief: [r.call.contact && `Calling: ${r.call.contact}`, r.call.details].filter(Boolean).join('\n') })
+
+/**
+ * Before dialing a spoken call, checks out loud what isn't settled: who you meant (a guessed name, or a Dai and a Di
+ * with the same name), and the one detail the other person will surely ask. Resolves like converse():
+ * go (with any detail you added) | request (a corrected request) | stop | none.
+ */
+function checkCall(call, heard, people, twin) {
+  const name = call.contact
+  const others = [twin?.name, ...likelyContacts(people, call.heard || heard, 8)].filter((n) => n && n !== name)
+  let opening
+  if (!call.to) opening = `I couldn’t find ${call.heard || 'that name'} in your contacts. Who should I call?`
+  else {
+    // A question that already names them ("Parshu Dai or Parshu Di?") says it all.
+    const asksWho = call.ask && call.ask.toLowerCase().includes(name.split(' ')[0].toLowerCase())
+    const who = asksWho ? '' : call.confirmWho ? (twin ? `Did you mean ${name} or ${twin.name}?` : `Just checking, you mean ${name}?`) : `Sure, I’ll call ${name}.`
+    opening = [who, sentence(call.ask)].filter(Boolean).join(' ')
+  }
+  return converse({ topic: 'check', opening, context: { heard, with: call.to ? name : '', goal: call.goal, others: [...new Set(others)] } })
+}
 
 /** A request to place a call, rather than a reminder that happens to mention calling. */
 function wantsACallNow(text) {
@@ -63,7 +83,8 @@ export default function VoiceAssistant({ initialText = '', onClose, onTask: hand
   const typed = useRef(false)
 
   // Turns what you said into a task and/or a call (Claude on the server, local parser as backup).
-  const interpret = async (heard, { spoken = false } = {}) => {
+  // checked: you already talked this call through (don't ask again). correcting: the misheard name you just corrected.
+  const interpret = async (heard, { spoken = false, checked = false, correcting = '' } = {}) => {
     setText(heard)
     setPhase('thinking')
     if (!smart) {
@@ -79,28 +100,50 @@ export default function VoiceAssistant({ initialText = '', onClose, onTask: hand
       }
       // The phone's contacts are read once per app start; don't rely on the Calls screen having opened first.
       const people = mergeContacts(useTaskStore.getState().contacts, phoneContacts().length ? phoneContacts() : await loadPhoneContacts())
-      const { result: r, usage } = await cp('/api/assistant', { text: heard, ...callerContext(), ...localNow(), lists: lists.map((l) => ({ id: l.id, name: l.name })), contacts: likelyContacts(people, heard) }, { timeoutMs: 45000 })
-      // The name it heard, matched to a saved or phone contact, gives the number. If that name was garbled,
-      // look for a contact's name anywhere in what you said.
-      // The name as you said it, kept so the call screen can offer other people who sound like it.
-      const heardName = r.call?.contact || ''
+      // Every callable contact's name (no numbers), so Claude can match a garbled name by how it sounds, plus the
+      // names you corrected before.
+      const { result: r, usage } = await cp('/api/assistant', { text: heard, ...callerContext(), ...localNow(), lists: lists.map((l) => ({ id: l.id, name: l.name })), contacts: contactNames(people, heard), aliases: aliasLines() }, { timeoutMs: 45000 })
+      // The name as speech-to-text heard it (maybe garbled), kept so the call screen can offer others who sound like it.
+      const heardName = r.call?.heard || r.call?.contact || ''
+      let twin = null
       if (r.call && !r.call.to) {
-        const named = r.call.contact && pickByName(people, r.call.contact)
+        // A name you corrected before goes to that contact. Otherwise the contact Claude picked, then the name as
+        // heard, then a contact's name anywhere in what you said.
+        const remembered = aliasFor(people, heardName)
+        const named = remembered || (r.call.contact && pickByName(people, r.call.contact)) || (heardName && pickByName(people, heardName))
         const who = named || pickByName(people, heard, { inSpeech: true })
         if (who) {
-          // A fuzzy match (Kesar → Keshab) must be confirmed. An exact name can dial on its own.
-          const said = (r.call.contact || '').trim().toLowerCase()
-          r.call = { ...r.call, to: who.phone, contact: who.name, confirmWho: who.name.trim().toLowerCase() !== said }
+          // Parshu Dai with a Parshu Di too: always checked, speech-to-text mixes them up.
+          twin = honorificTwin(people, who)
+          // Heard just as it's saved (or corrected to it before): it can dial on its own. A guess (Pursue → Parshu) is checked.
+          const sure = !!remembered || heardKey(who.name) === heardKey(heardName)
+          r.call = { ...r.call, to: who.phone, contact: who.name, confirmWho: !sure || !!twin }
         }
       }
       if (r.call) r.call.heard = heardName
+      // You said who in a correction: next time the misheard name goes straight to them.
+      if (correcting && r.call?.to) rememberAlias(correcting, r.call.contact)
+      if (checked && r.call) r.call.confirmWho = false
       recordOtherUsage('assistant', usage)
       // Single, clear intent: go straight to it.
       if (r.kind === 'task' && r.task) return onTask({ ...r.task, listId: r.task.listId || undefined })
       // A call you said out loud, with who and why: plan it and dial, hands-free (cancel stays one tap away).
-      // The call screen shows who it matched, with one tap to pick someone else; a guessed contact waits for your OK.
-      if (spoken && r.kind === 'call' && r.call && r.call.when !== 'later' && r.call.to && r.call.goal) {
-        return onCall({ ...callDraft(r), autoStart: true, heard: r.call.heard, confirmWho: !!r.call.confirmWho })
+      if (spoken && r.kind === 'call' && r.call && r.call.when !== 'later' && r.call.goal) {
+        // Not sure who you meant, or something to settle first: ask out loud before dialing.
+        if (!checked && canTalk() && (!r.call.to || r.call.confirmWho || r.call.ask)) {
+          const end = await checkCall(r.call, heard, people, twin)
+          if (closed.current) return
+          if (end.outcome === 'go' && r.call.to) {
+            if (r.call.confirmWho) rememberAlias(heardName, r.call.contact)
+            const details = [r.call.details, end.text].filter(Boolean).join('\n')
+            return onCall({ ...callDraft({ ...r, call: { ...r.call, details } }), autoStart: true, heard: heardName, confirmWho: false })
+          }
+          if (end.outcome === 'request') return interpret(end.text, { spoken: true, checked: true, correcting: r.call.to && !r.call.confirmWho ? '' : heardName })
+          if (end.outcome === 'stop') return cancel()
+          // Nothing said back: the call screen asks instead (a guessed contact waits for your tap).
+        }
+        // The call screen shows who it matched, with one tap to pick someone else.
+        if (r.call.to) return onCall({ ...callDraft(r), autoStart: true, heard: r.call.heard, confirmWho: !!r.call.confirmWho })
       }
       setResult(r)
       setPhase('result')

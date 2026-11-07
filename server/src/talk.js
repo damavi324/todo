@@ -51,6 +51,12 @@ const TOPICS = {
     about: (c) => `They asked for a call${c.with ? ` to ${s(c.with, 120)}` : ''}${c.goal ? ` (${s(c.goal, 300)})` : ''}, and it couldn't go ahead: "${s(c.problem, 600)}".`,
     outcomes: () => '"retry" (try the same call again), "request" (they want something different: put the complete new request in "text", e.g. "Call Ram on his work number instead"), "stop" (leave it), or "continue" (ask one more short question).',
   },
+  check: {
+    about: (c) => `They said: "${s(c.heard, 1000)}". Before dialing, the app checked with them: who to call${c.with ? ` (best match: ${s(c.with, 120)})` : ' (no contact matched)'}${c.goal ? `, to ${s(c.goal, 300)}` : ''}.` +
+      (Array.isArray(c.others) && c.others.length ? ` Other contacts that sound alike: ${c.others.slice(0, 8).map((x) => s(x, 80)).join('; ')}.` : '') +
+      ' Use contact names exactly as written. Dai (older brother) and Di (older sister) are different people.',
+    outcomes: () => '"go" (the call is right as it is: put any detail they added in "text" as one short sentence for the call, e.g. "Meet at the Starbucks on Main", or leave it empty), "request" (they named someone else or changed the call: put the complete new request in "text", e.g. "Call Parshu Di and invite her for coffee now at Starbucks on Main"), "stop" (they want to leave it), or "continue" (ask one more short question).',
+  },
 };
 
 /**
@@ -82,7 +88,7 @@ export async function talk({ topic, context = {}, turns = [], owner, assistant, 
     prompt: `${now ? `Local time: ${s(now, 40)} (${s(weekday, 12)}).\n` : ''}The conversation so far:\n${lines.join('\n')}`,
   });
   const r = parseJson(reply) || {};
-  const allowed = { unclear: ['request', 'stop', 'continue'], question: ['answer', 'stop', 'continue'], problem: ['retry', 'request', 'stop', 'continue'] }[topic];
+  const allowed = { unclear: ['request', 'stop', 'continue'], check: ['go', 'request', 'stop', 'continue'], question: ['answer', 'stop', 'continue'], problem: ['retry', 'request', 'stop', 'continue'] }[topic];
   let outcome = allowed.includes(r.outcome) ? r.outcome : 'continue';
   const text = s(r.text, 2000);
   // An answer or a new request with nothing in it would do nothing: ask again instead.

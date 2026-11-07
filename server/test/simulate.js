@@ -82,11 +82,13 @@ const claudeServer = http.createServer((req, res) => {
     const text = isTalk
       ? (/asked them:/.test(json.system)
         ? '{"reply":"Okay, I’ll tell Pilot Tuesday works.","outcome":"answer","text":"Yes, Tuesday at 9 works"}'
+        : /Before dialing, the app checked/.test(json.system)
+        ? '{"reply":"Okay, calling Parshu Dai now.","outcome":"go","text":""}'
         : '{"reply":"Got it, calling Ram about dinner.","outcome":"request","text":""}')
       : isTask
       ? '{"title":"Buy milk","notes":"","dueDate":"2026-11-03","dueTime":"25:00","priority":"urgent"}'
       : isAssistant
-      ? '{"kind":"both","task":{"title":"Call the dentist","notes":"","dueDate":"2026-10-30","dueTime":"09:00","priority":"medium","listId":"personal"},"call":{"to":"(214) 555-0100","contact":"Bright Smiles Dental","goal":"Move the cleaning to a weekday morning","details":"Patient: Manoj Khanal","mode":"agent","when":"later"},"say":"Reminder Friday 9am to have Pilot call the dentist.","question":""}'
+      ? '{"kind":"both","task":{"title":"Call the dentist","notes":"","dueDate":"2026-10-30","dueTime":"09:00","priority":"medium","listId":"personal"},"call":{"to":"(214) 555-0100","contact":"Bright Smiles Dental","goal":"Move the cleaning to a weekday morning","details":"Patient: Manoj Khanal","mode":"agent","when":"later","ask":"Which day works best?"},"say":"Reminder Friday 9am to have Pilot call the dentist.","question":""}'
       : isPlan
       ? 'Here is the plan:\n{"objective":"Move the cleaning to a weekday morning next week","opening":"I\'m calling to reschedule a cleaning for Mk Khanal.","steps":["Explain the reason","Offer Tue-Thu 8-11am"],"facts_to_share":[{"label":"Patient","value":"Mk Khanal"},{"label":"Bad","value":""}],"can_agree_to":["Any Tue-Thu slot 8-11am"],"ask_owner_before":["Any fee"],"never_share":["Card number"],"likely_questions":[{"q":"Date of birth?","a":"Ask Mk"}],"if_phone_menu":"Press 2 for appointments","if_voicemail":"Hi, this is Pilot for Mk Khanal about rescheduling.","confirm_before_hanging_up":["date","time"],"missing_info":["Insurance provider"]}'
       : isSummary
@@ -834,7 +836,7 @@ try {
   br = await fetch(base + '/api/assistant', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: 'remind me friday at 9 to have pilot call the dentist at 214 555 0100 to move my cleaning', now: '2026-10-27T20:00', weekday: 'Tuesday', timezone: 'America/Chicago', lists: [{ id: 'inbox', name: 'Inbox' }, { id: 'personal', name: 'Personal' }], contacts: ['Puja Khanal', 'Bright Smiles Dental'] }),
+    body: JSON.stringify({ text: 'remind me friday at 9 to have pilot call the dentist at 214 555 0100 to move my cleaning', now: '2026-10-27T20:00', weekday: 'Tuesday', timezone: 'America/Chicago', lists: [{ id: 'inbox', name: 'Inbox' }, { id: 'personal', name: 'Personal' }], contacts: ['Puja Khanal', 'Bright Smiles Dental'], aliases: ['pursue di = Parshu Dai'] }),
   });
   const { result } = await br.json();
   assert.equal(result.kind, 'both');
@@ -844,7 +846,12 @@ try {
   const aReq = claudeRequests.find((c) => /voice front door/.test(c.json.system));
   assert.equal(aReq.json.model, 'claude-haiku-5-5');
   assert.match(aReq.json.messages[0].content, /Tuesday/);
-  assert.match(aReq.json.messages[0].content, /similar name \(spelling may differ\): Puja Khanal; Bright Smiles Dental\. Speech-to-text often garbles names .*put that contact's name in call\.contact exactly as written here/);
+  assert.match(aReq.json.messages[0].content, /Their contacts \(the ones that sound most like what they said come first\): Puja Khanal; Bright Smiles Dental\n/);
+  assert.match(aReq.json.messages[0].content, /Names they corrected before \(heard = contact\): pursue di = Parshu Dai/);
+  assert.match(aReq.json.system, /match by how it sounds, not how it is spelled/);
+  assert.match(aReq.json.system, /Dai \(older brother\) and Di or Didi \(older sister\) are different people/);
+  assert.match(aReq.json.system, /call\.ask is empty unless something must be settled before dialing/);
+  assert.equal(result.call.ask, 'Which day works best?', 'the question to settle before dialing comes back');
   assert.match(aReq.json.system, /no relationship words or brackets/);
   assert.match(aReq.json.system, /starts with "call", "phone", "ring" or "dial".*is a call made NOW/, "a bare \"Call X\" is a call, not a task");
   assert.match(aReq.json.system, /Never turn a call request into a task just because the name is unclear/);
@@ -878,6 +885,12 @@ try {
   // A new request with nothing in it can't be acted on, so the conversation carries on instead.
   tk = await (await fetch(base + '/api/talk', { method: 'POST', headers: authed, body: JSON.stringify({ topic: 'unclear', context: { heard: 'call ram', question: 'What should I ask Ram?' }, turns: [{ role: 'assistant', text: 'What should I ask Ram?' }, { role: 'user', text: 'dinner' }] }) })).json();
   assert.equal(tk.result.outcome, 'continue');
+  // Checking a spoken call before dialing: who it matched, the names that sound alike, and "go" needs no text.
+  tk = await (await fetch(base + '/api/talk', { method: 'POST', headers: authed, body: JSON.stringify({ topic: 'check', context: { heard: 'Call Pursue Di, invite him for coffee', with: 'Parshu Dai', goal: 'Invite him for coffee now', others: ['Parshu Di'] }, turns: [{ role: 'assistant', text: 'Did you mean Parshu Dai or Parshu Di?' }, { role: 'user', text: 'Parshu Dai' }] }) })).json();
+  assert.deepEqual(tk.result, { reply: 'Okay, calling Parshu Dai now.', outcome: 'go', text: '' });
+  const checkReq = claudeRequests.filter((c) => /Before dialing, the app checked/.test(c.json.system)).at(-1);
+  assert.match(checkReq.json.system, /best match: Parshu Dai.*Other contacts that sound alike: Parshu Di\..*Dai \(older brother\) and Di \(older sister\) are different people/);
+  assert.match(checkReq.json.system, /"go" \(the call is right as it is/);
   assert.equal((await fetch(base + '/api/talk', { method: 'POST', headers: authed, body: JSON.stringify({ topic: 'nope', turns: [{ role: 'user', text: 'hi' }] }) })).status, 502);
   assert.equal((await fetch(base + '/api/talk', { method: 'POST', headers: authed, body: JSON.stringify({ topic: 'unclear', turns: [{ role: 'assistant', text: 'What?' }] }) })).status, 502);
   pass('Voice mode talks back: Aura-2 voice from Deepgram, and a short spoken back-and-forth with Haiku that ends in an answer or a request');

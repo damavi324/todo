@@ -17,10 +17,12 @@ const SCHEMA = `{
   "call": {
     "to": "phone number digits exactly as spoken, or empty",
     "contact": "who to call (business or person name), or empty",
+    "heard": "that name exactly as it appears in what they said, even if garbled (e.g. Pursue Di), or empty",
     "goal": "one sentence: what the call should achieve",
     "details": "everything the assistant may need: names, account info, preferred times, limits, what not to agree to",
     "mode": "agent (the assistant makes the call) | copilot (the user talks, AI coaches)",
-    "when": "now | later"
+    "when": "now | later",
+    "ask": "one short question to ask before dialing, or empty (see the rules)"
   },
   "say": "one short, friendly confirmation of what you understood",
   "question": "if kind is unclear: the single question to ask, else empty"
@@ -40,6 +42,9 @@ function systemPrompt(owner = config.ownerName, assistant = config.assistantName
     '- Resolve relative dates and times ("tomorrow", "next Monday", "in 2 hours", "this evening" = 18:00, "morning" = 09:00 only if they asked for a reminder time) using the current date and time given.',
     '- Never invent phone numbers, names or facts. Leave fields empty when unknown.',
     '- call.contact is the person or business name only, with no relationship words or brackets ("Pooja", not "Pooja (wife)"); put the relationship in details.',
+    '- Who to call: if what they said sounds like one of their contacts, put that contact\'s name in call.contact exactly as written in the list. Speech-to-text garbles names, Nepali ones most of all ("Pursue Di" for "Parshu Dai", "Kesar Raz" for "Keshab Raj"), so match by how it sounds, not how it is spelled. A name they corrected before (the "heard = contact" list) means that contact.',
+    '- Forms of address are part of who someone is: Dai (older brother) and Di or Didi (older sister) are different people, as are Bhai and Bahini. Speech-to-text mixes up Dai and Di, so use the rest of the request to tell which (him or his means a man, her or she a woman). When they have both (say "Parshu Dai" and "Parshu Di") and nothing tells which, pick the closer one and ask which they meant in call.ask.',
+    `- call.ask is empty unless something must be settled before dialing: which of two contacts they meant, or a detail the other person will surely need that the request leaves out (where to meet, which day, how much), or they asked you to check with them ("let me know if you have questions"). Ask about all of it in one short spoken question ("Where should he meet you?"). Never ask what ${assistant} can find out on the call.`,
     '- Fill only the sections that apply; omit or leave empty the other one.',
     '- Keep "say" under 20 words.',
     `Reply ONLY with JSON in this shape:\n${SCHEMA}`,
@@ -48,7 +53,10 @@ function systemPrompt(owner = config.ownerName, assistant = config.assistantName
 
 const s = (v, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
-export async function interpret({ text, now, timezone, weekday, lists, owner, about, contacts, assistant }, usage) {
+// Names only, never numbers: a few thousand names cost about a tenth of a cent with the fast model.
+const MAX_CONTACTS = 2000;
+
+export async function interpret({ text, now, timezone, weekday, lists, owner, about, contacts, aliases, assistant }, usage) {
   const spoken = s(text, 6000);
   if (!spoken) throw new Error('Nothing was heard');
   const listText = Array.isArray(lists) && lists.length
@@ -60,7 +68,10 @@ export async function interpret({ text, now, timezone, weekday, lists, owner, ab
     '',
     about ? `About ${s(owner, 80) || config.ownerName}, true on every call: ${s(about, 4000)}` : '',
     Array.isArray(contacts) && contacts.length
-      ? `Contacts on their phone with a similar name (spelling may differ): ${contacts.slice(0, 12).map((c) => s(c, 80)).filter(Boolean).join('; ')}. Speech-to-text often garbles names ("Kesar Raz" for "Keshab Raj"), so if what they said sounds like one of them, put that contact's name in call.contact exactly as written here.`
+      ? `Their contacts (the ones that sound most like what they said come first): ${contacts.slice(0, MAX_CONTACTS).map((c) => s(c, 80)).filter(Boolean).join('; ')}`
+      : '',
+    Array.isArray(aliases) && aliases.length
+      ? `Names they corrected before (heard = contact): ${aliases.slice(0, 50).map((a) => s(a, 160)).filter(Boolean).join('; ')}`
       : '',
     `They said: "${spoken}"`,
   ].join('\n');
@@ -96,10 +107,12 @@ export function normalize(r, spoken, lists = []) {
     out.call = {
       to: toE164(raw) || raw.replace(/[^\d+]/g, ''),
       contact: s(c.contact, 120),
+      heard: s(c.heard, 120),
       goal: s(c.goal, 400),
       details: s(c.details, 6000),
       mode: c.mode === 'copilot' ? 'copilot' : 'agent',
       when: c.when === 'later' ? 'later' : 'now',
+      ask: s(c.ask, 200),
     };
   }
   if (out.kind === 'task' && !out.task) out.task = { title: spoken.slice(0, 120), notes: '', dueDate: '', dueTime: '', priority: 'none', listId: '' };

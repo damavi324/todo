@@ -47,6 +47,8 @@ export const DEFAULT_SETTINGS = {
   callLanguage: 'en',
   // How the assistant thinks on calls: 'smart' (Claude Sonnet, better reasoning) or 'fast' (Claude Haiku, quicker).
   callThinking: 'smart',
+  // Names voice mode misheard and you corrected: { heard key: contact name } (see lib/contactAliases.js).
+  contactAliases: {},
   callSkills: DEFAULT_SKILLS,
   // Empty means the phone's best voice for its language.
   voiceName: '',

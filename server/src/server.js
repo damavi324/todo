@@ -317,7 +317,7 @@ async function route(req, res) {
   if (p === '/api/assistant' && method === 'POST') {
     const body = await readBody(req);
     try {
-      log(`[assistant] heard: ${String(body.text || '').slice(0, 160)} (${Array.isArray(body.contacts) ? body.contacts.length : 0} similar contacts sent)`);
+      log(`[assistant] heard: ${String(body.text || '').slice(0, 160)} (${Array.isArray(body.contacts) ? body.contacts.length : 0} contact names sent)`);
       const usage = {};
       const result = await interpret(body, usage);
       log(`[assistant] understood as ${result.kind}${result.task ? ` | task: ${result.task.title}` : ''}${result.call ? ` | call: ${result.call.contact || result.call.to || '?'} (${result.call.when})` : ''}`);

@@ -80,9 +80,27 @@ export function nameKey(word) {
     .replace(/(.)\1+/g, '$1')
 }
 
+// Nepali forms of address said with a name ("Parshu Dai", "Sita Di"). They tell people apart, so they are never
+// treated as the same: Dai (older brother) is not Di (older sister). Spellings of one form share a key.
+const HONORIFICS = { dai: 'dai', daai: 'dai', daju: 'dai', dajyu: 'dai', dajoo: 'dai', di: 'di', didi: 'di', didee: 'di',
+  bhai: 'bhai', bahini: 'bahini', baini: 'bahini', ji: 'ji', jee: 'ji', kaka: 'kaka', kaki: 'kaki', bhauju: 'bhauju',
+  bhinaju: 'bhinaju', bhena: 'bhinaju', sir: 'sir', aunty: 'aunty', auntie: 'aunty', anti: 'aunty' }
+const honorific = (w) => HONORIFICS[w] || ''
+
+/**
+ * How a name word sounds, roughly: its first letter, then its consonants. Speech-to-text gets vowels wrong far more
+ * than consonants ("Pursue" for "Parshu": both p-r-s).
+ */
+export function soundKey(word) {
+  const k = nameKey(word)
+  return (k[0] || '') + k.slice(1).replace(/[aeiouy]/g, '')
+}
+
 const words = (text) => String(text || '').toLowerCase().replace(/\([^)]*\)/g, ' ').split(/[^a-z\u00c0-\u024f]+/).filter(Boolean)
 /** The words of what was said that could be part of a name. */
-const nameWords = (text) => words(text).filter((w) => !RELATIONS.has(w)).map(nameKey).filter((k) => k.length >= 2)
+const nameWords = (text) => words(text).filter((w) => !RELATIONS.has(w) && !honorific(w)).map(nameKey).filter((k) => k.length >= 2)
+/** The forms of address in a name or in what was said, as keys (dai, di, ...). */
+const honorifics = (text) => words(text).map(honorific).filter(Boolean)
 
 // Titles and filler. A contact can actually be named Mom or Wife, so those stay available as names.
 const NOT_A_NAME = new Set(['my', 'the', 'call', 'phone', 'ring', 'office', 'dr', 'doctor', 'mr', 'mrs', 'ms', 'miss'])
@@ -125,7 +143,12 @@ function close(a, b) {
   const short = Math.min(a.length, b.length)
   // Three-letter words (Raj, Ram, Ana) get one slip only when the first letter agrees.
   const max = short >= 7 ? 2 : short >= 4 ? 1 : short === 3 && a[0] === b[0] ? 1 : 0
-  return max > 0 && edits(a, b, max) <= max
+  if (max > 0 && edits(a, b, max) <= max) return true
+  // Same consonants in the same order, vowels misheard: Pursue = Parshu, Kesab = Keshav. Needs three consonants,
+  // so short names (Ram, Rima) don't all sound alike.
+  const sa = soundKey(a)
+  const sb = soundKey(b)
+  return sa.length >= 3 && (sa === sb || (sa.length >= 4 && sb.length >= 4 && edits(sa, sb, 1) <= 1))
 }
 
 /** Relationship words said with the name ("wife") that a contact's notes or label mention. */
@@ -135,14 +158,17 @@ const relationHint = (text, c) => String(text || '').toLowerCase().split(/[^a-z]
  * How well a contact's name fits the words said: how many of its words were heard (exact ones count more),
  * and what share of the name and of what was said they cover. 0 = no fit.
  */
-function fit(c, said) {
+function fit(c, said, saidForms = []) {
   const name = nameWords(c.name)
   if (!name.length) return { score: 0 }
+  // A form of address said and saved agrees (Dai and Dai) or differs (Di said, Dai saved): a nudge, not a match.
+  const forms = honorifics(c.name)
+  const form = forms.length && saidForms.length ? (forms.some((x) => saidForms.includes(x)) ? 0.5 : -0.4) : 0
   const hit = name.filter((n) => said.some((w) => close(w, n))).length
   if (!hit) return { score: 0 }
   const exact = name.filter((n) => said.includes(n)).length
   const saidHit = said.filter((w) => name.some((n) => close(w, n))).length
-  return { score: hit + exact * 0.5 + hit / name.length + saidHit / said.length, hit, exact, ofName: hit / name.length, ofSaid: saidHit / said.length, size: name.length, shortest: Math.min(...name.map((n) => n.length)) }
+  return { score: hit + exact * 0.5 + hit / name.length + saidHit / said.length + form, hit, exact, ofName: hit / name.length, ofSaid: saidHit / said.length, size: name.length, shortest: Math.min(...name.map((n) => n.length)) }
 }
 
 /**
@@ -162,6 +188,7 @@ export function pickByName(allContacts, text, { inSpeech = false } = {}) {
   let found = contacts.filter((c) => c.name.toLowerCase() === q)
   if (!found.length) {
     const said = nameWords(q)
+    const forms = honorifics(q)
     if (!said.length) {
       const named = namedByRelation(contacts, q)
       if (!named.length) return null
@@ -174,7 +201,7 @@ export function pickByName(allContacts, text, { inSpeech = false } = {}) {
     // Best fit per person (one name, possibly several numbers).
     const best = new Map()
     for (const c of contacts) {
-      const f = fit(c, said)
+      const f = fit(c, said, forms)
       if (!ok(f)) continue
       const key = c.name.toLowerCase()
       if (!best.has(key) || best.get(key).score < f.score) best.set(key, { score: f.score, name: key })
@@ -202,11 +229,12 @@ export function pickByName(allContacts, text, { inSpeech = false } = {}) {
 export function likelyContacts(allContacts, text, max = 12) {
   const contacts = usOnly(allContacts)
   const said = nameWords(text)
+  const forms = honorifics(text)
   const best = new Map()
   for (const c of namedByRelation(contacts, text)) best.set(c.name, 10)
   if (said.length) {
     for (const c of contacts) {
-      const { score } = fit(c, said)
+      const { score } = fit(c, said, forms)
       if (score > (best.get(c.name) || 0)) best.set(c.name, score)
     }
   }
@@ -223,3 +251,24 @@ export function searchContacts(allContacts, text, max = 8) {
   const sounds = new Set(likelyContacts(contacts, q, max))
   return [...direct, ...contacts.filter((c) => sounds.has(c.name) && !direct.includes(c))].slice(0, max)
 }
+
+/**
+ * Another contact with the same name but a different form of address ("Parshu Di" for "Parshu Dai"). Speech-to-text
+ * mixes these up, so a call to either is checked with you first.
+ */
+export function honorificTwin(allContacts, contact) {
+  if (!contact) return null
+  const core = nameWords(contact.name).join(' ')
+  const forms = honorifics(contact.name).join(' ')
+  const name = contact.name.trim().toLowerCase()
+  return usOnly(allContacts).find((c) => c.name.trim().toLowerCase() !== name && nameWords(c.name).join(' ') === core && honorifics(c.name).join(' ') !== forms) || null
+}
+
+/** Every callable (US) contact name, once each: the best guesses for what was said first, then everyone else. */
+export function contactNames(allContacts, text, max = 2000) {
+  const first = likelyContacts(allContacts, text)
+  return [...new Set([...first, ...usOnly(allContacts).map((c) => c.name.trim()).filter(Boolean)])].slice(0, max)
+}
+
+/** The key a heard name is remembered under: its words, spelling-tolerant, forms of address kept as said. */
+export const heardKey = (text) => words(text).filter((w) => !NOT_A_NAME.has(w)).map((w) => honorific(w) || nameKey(w)).filter(Boolean).join(' ')
